@@ -1,0 +1,363 @@
+@import "tailwindcss";
+
+/* =========================================================
+   Thème Nuit — conservé (lisible déjà)
+   ========================================================= */
+:root {
+  --bg: #0b0f17;
+  --panel: #111827;
+  --text: #f9fafb;
+  --muted: #9ca3af;
+
+  --accent: #2563eb;   /* Bleu primaire */
+  --accent-2: #14b8a6; /* Turquoise secondaire */
+
+  --card: rgba(255,255,255,0.05);
+  --border: rgba(255,255,255,0.10);
+  --ring: rgba(59,130,246,.35);
+  --shadow: 0 10px 30px rgba(0,0,0,.35);
+  --shadow-soft: 0 6px 20px rgba(0,0,0,.25);
+  --elevated: #0f172a; /* SOLIDE pour modales */
+}
+
+/* =========================================================
+   Thème Jour — contrastes renforcés & codes complémentaires
+   ========================================================= */
+:root[data-theme="light"]{
+  /* Texte et fonds */
+  --bg: #f5f7fb;             /* fond app */
+  --text: #0b1220;           /* texte principal */
+  --muted: #4b5563;          /* slate-600 : lisible mais doux */
+
+  /* Surfaces */
+  --card: #ffffff;           /* cartes pleines (pas de transparence) */
+  --border: rgba(2,6,23,.12);
+  --ring: rgba(59,130,246,.35);
+  --shadow: 0 16px 40px rgba(2,6,23,.10);
+  --shadow-soft: 0 8px 24px rgba(2,6,23,.06);
+  --elevated: #ffffff;
+
+  /* Boutons neutres (≠ chips) */
+  --btn-bg: #eef2ff;         /* indigo-50 */
+  --btn-text: #1f2351;       /* indigo-900 */
+  --btn-border: #c7d2fe;     /* indigo-200 */
+
+  /* Chips/Pills (≠ boutons) */
+  --chip-bg: #f1f5f9;        /* slate-100 */
+  --chip-text: #334155;      /* slate-700 */
+  --chip-border: #e2e8f0;    /* slate-200 */
+
+  /* CTA primaire */
+  --primary-start: #3b82f6;  /* bleu */
+  --primary-end:   #2563eb;
+  --primary-shadow: rgba(37,99,235,.28);
+
+  /* Palette sémantique (utilisée ci-dessous) */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger:  #ef4444;
+
+  /* Couleurs “lanes” (complémentaires, lisibles) */
+  --lane-leads-bg:      #f8fafc; /* gris bleu très clair */
+  --lane-leads-accent:  #475569;
+
+  --lane-callreq-bg:    #ecfeff; /* cyan-50 */
+  --lane-callreq-accent:#0891b2; /* cyan-700 */
+
+  --lane-calls-bg:      #fff7ed; /* amber-50 */
+  --lane-calls-accent:  #b45309; /* amber-700 */
+
+  --lane-answered-bg:   #ecfdf5; /* emerald-50 */
+  --lane-answered-accent:#047857;/* emerald-700 */
+
+  --lane-noshow-bg:     #fef2f2; /* rose-50 */
+  --lane-noshow-accent: #b91c1c; /* rose-700 */
+}
+
+/* ========= Reset ========= */
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  transition: background-color .25s ease, color .25s ease;
+}
+
+.text-muted, .muted, .text-\[--muted\] { color: var(--muted) !important; }
+
+/* =========================================================
+   Barre d’outils (ex: Importer CSV / Filtres ...)
+   ========================================================= */
+.toolbar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  border-radius: 1rem;
+  padding: .5rem;
+}
+
+/* =========================================================
+   Cartes / Panneaux
+   ========================================================= */
+.card {
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  padding: 1.25rem; /* ≈ p-5 */
+  box-shadow: var(--shadow-soft);
+  transition: background .25s, color .25s, border-color .25s, box-shadow .25s, transform .06s;
+}
+.card:hover { box-shadow: var(--shadow); }
+.card--kpi { padding: 1rem 1.25rem; }
+
+/* KPI colorés (bordure gauche) */
+.card--kpi[data-kind="leads"]     { border-left: 6px solid var(--lane-leads-accent); }
+.card--kpi[data-kind="opps"]      { border-left: 6px solid #7c3aed; }      /* violet */
+.card--kpi[data-kind="revenue"]   { border-left: 6px solid #2563eb; }      /* bleu */
+.card--kpi[data-kind="conversion"]{ border-left: 6px solid var(--success); }
+
+/* =========================================================
+   Boutons — bien distincts des chips/pills
+   ========================================================= */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: .5rem;
+  border-radius: .75rem;
+  padding: .55rem .95rem;
+  font-size: .875rem; font-weight: 700;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: rgba(255,255,255,0.06);
+  transition: background .2s, opacity .15s, border-color .2s,
+             transform .08s, box-shadow .2s, color .2s;
+}
+.btn:hover { background: rgba(255,255,255,0.10); }
+.btn:active { transform: translateY(1px); }
+
+/* Jour : bouton neutre lisible (≠ chip) */
+:root[data-theme="light"] .btn {
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  border-color: var(--btn-border);
+  box-shadow: 0 4px 12px rgba(2,6,23,.06);
+}
+:root[data-theme="light"] .btn:hover   { filter: brightness(0.98); }
+:root[data-theme="light"] .btn:active  { filter: brightness(0.96); }
+
+/* Primaire */
+.btn-primary{
+  background: linear-gradient(180deg, var(--primary-start), var(--primary-end));
+  color:#fff; border-color: transparent;
+  box-shadow: 0 10px 22px var(--primary-shadow);
+}
+.btn-primary:hover { filter: brightness(1.03); }
+.btn-primary:active { transform: translateY(1px); }
+
+/* Secondaire (gris foncé) */
+.btn-secondary{
+  background: linear-gradient(180deg,#4b5563,#374151);
+  color:#fff; border-color: transparent;
+}
+:root[data-theme="light"] .btn-secondary{
+  background: #e5e7eb; color:#111827; border-color:#cbd5e1;
+}
+
+/* Outline */
+.btn-outline{
+  background: transparent;
+  border: 1px solid currentColor;
+}
+:root[data-theme="light"] .btn-outline{ color:#1f2937; }
+
+/* Ghost */
+.btn-ghost{
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.btn-ghost:hover { background: rgba(255,255,255,.06); }
+:root[data-theme="light"] .btn-ghost:hover { background:#f8fafc; }
+
+/* Sémantiques */
+.btn-success{ background: #10b981; color:#fff; border-color: transparent; }
+.btn-warning{ background: #f59e0b; color:#111827; border-color: transparent; }
+.btn-danger { background: #ef4444; color:#fff; border-color: transparent; }
+
+/* =========================================================
+   Chips / Badges / Pills — jamais confondus avec .btn
+   ========================================================= */
+.badge, .chip {
+  display:inline-flex; align-items:center; gap:.4rem;
+  padding:.32rem .6rem;
+  font-size:.75rem; font-weight: 700;
+  border-radius:.6rem;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  transition: background .2s, border-color .2s, color .2s;
+}
+:root[data-theme="light"] .badge,
+:root[data-theme="light"] .chip{
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  border-color: var(--chip-border);
+}
+
+/* Variantes sémantiques lisibles en Jour */
+.badge--ok    { background: rgba(16,185,129,.15); color:#10b981; border-color: rgba(16,185,129,.35); }
+.badge--warn  { background: rgba(245,158,11,.15); color:#b45309; border-color: rgba(245,158,11,.35); }
+.badge--error { background: rgba(239,68,68,.15);  color:#b91c1c; border-color: rgba(239,68,68,.35); }
+:root[data-theme="light"] .badge--ok    { background:#ecfdf5; color:#047857; border-color:#a7f3d0; }
+:root[data-theme="light"] .badge--warn  { background:#fffbeb; color:#92400e; border-color:#fde68a; }
+:root[data-theme="light"] .badge--error { background:#fef2f2; color:#991b1b; border-color:#fecaca; }
+
+/* Dot décoratif (ex: titre de colonne) */
+.badge-dot { position: relative; padding-left: .9rem; }
+.badge-dot::before{
+  content:""; position:absolute; left:.45rem; top:50%;
+  width:.42rem; height:.42rem; transform: translate(-50%,-50%);
+  border-radius:9999px; background: var(--accent);
+}
+
+/* =========================================================
+   Formulaires
+   ========================================================= */
+.input, .select, .textarea{
+  width: 100%;
+  border-radius: .75rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: .55rem .75rem;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s, background .2s, color .2s;
+}
+.input::placeholder, .textarea::placeholder{ color: var(--muted); opacity: .95; }
+.input:focus, .select:focus, .textarea:focus{ box-shadow: 0 0 0 3px var(--ring); border-color: var(--ring); }
+
+/* Jour : champs “full white” (≠ boutons & chips) */
+:root[data-theme="light"] .input,
+:root[data-theme="light"] .select,
+:root[data-theme="light"] .textarea {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  box-shadow: 0 2px 6px rgba(2,6,23,.04) inset;
+}
+
+/* =========================================================
+   Tabs / petits filtres
+   ========================================================= */
+.tab {
+  padding:.375rem .75rem; border-radius:.75rem;
+  border:1px solid var(--border);
+  background: rgba(255,255,255,0.05);
+  font-weight:700;
+  transition: background .2s, border-color .2s, color .2s;
+}
+.tab--active { background: rgba(255,255,255,0.10); }
+:root[data-theme="light"] .tab{ background:#ffffff; }
+:root[data-theme="light"] .tab--active{ background:#eef2ff; border-color:#c7d2fe; color:#1f2351; }
+
+/* =========================================================
+   Lanes / colonnes (Kanban) — applis tes classes sur tes colonnes
+   ========================================================= */
+/* Conteneur de colonne (applique .lane + la variante ci-dessous) */
+.lane{
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+/* En-tête de colonne */
+.lane-head{
+  display:flex; align-items:center; gap:.5rem;
+  padding:.5rem .75rem;
+  font-weight: 800;
+  letter-spacing:.01em;
+  color:#fff; /* par défaut, la plupart des têtes sont foncées */
+  background: #0f172a;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Variantes lisibles en Jour (fonds clairs + accent visible) */
+:root[data-theme="light"] .lane--leads       { background: var(--lane-leads-bg); }
+:root[data-theme="light"] .lane--callreq     { background: var(--lane-callreq-bg); }
+:root[data-theme="light"] .lane--calls       { background: var(--lane-calls-bg); }
+:root[data-theme="light"] .lane--answered    { background: var(--lane-answered-bg); }
+:root[data-theme="light"] .lane--noshow      { background: var(--lane-noshow-bg); }
+
+/* Barres d’accent en tête (lisibles de suite) */
+:root[data-theme="light"] .lane--leads    .lane-head{ color:#0b1220; background: linear-gradient(90deg,#334155, #475569); }
+:root[data-theme="light"] .lane--callreq  .lane-head{ background: linear-gradient(90deg,#0891b2,#06b6d4); }
+:root[data-theme="light"] .lane--calls    .lane-head{ background: linear-gradient(90deg,#b45309,#f59e0b); color:#111827; }
+:root[data-theme="light"] .lane--answered .lane-head{ background: linear-gradient(90deg,#047857,#10b981); }
+:root[data-theme="light"] .lane--noshow   .lane-head{ background: linear-gradient(90deg,#b91c1c,#ef4444); }
+
+/* Liseré gauche pour mémorisation rapide */
+.lane--leads       { border-left: 6px solid var(--lane-leads-accent); }
+.lane--callreq     { border-left: 6px solid var(--lane-callreq-accent); }
+.lane--calls       { border-left: 6px solid var(--lane-calls-accent); }
+.lane--answered    { border-left: 6px solid var(--lane-answered-accent); }
+.lane--noshow      { border-left: 6px solid var(--lane-noshow-accent); }
+
+/* Corps de colonne */
+.lane-body{ padding: .5rem; }
+
+/* Petits points de légende */
+.legend-dot{
+  width:.6rem; height:.6rem; border-radius:9999px; display:inline-block;
+  background: currentColor;
+}
+
+/* =========================================================
+   Tables
+   ========================================================= */
+.table { width:100%; font-size:.875rem; border-collapse:collapse; }
+.table th { text-align:left; font-weight:700; color: var(--muted); padding:.5rem .75rem; }
+.table td { padding:.5rem .75rem; border-top:1px solid var(--border); }
+
+/* Liens */
+a { color: inherit; text-decoration: none; }
+
+/* =========================================================
+   Modales (surfaces solides)
+   ========================================================= */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  display:flex; align-items:center; justify-content:center;
+  z-index: 50;
+}
+.modal-panel {
+  width: 100%; max-width: 44rem;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+}
+.modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:.75rem; }
+.modal-footer { display:flex; gap:.5rem; justify-content:flex-end; margin-top:1rem; }
+
+/* =========================================================
+   Scrollbars
+   ========================================================= */
+* { scrollbar-width: thin; scrollbar-color: #94a3b8 transparent; }
+*::-webkit-scrollbar { height: 10px; width: 10px; }
+*::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: #64748b;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+:root[data-theme="light"] *::-webkit-scrollbar-thumb { background:#cbd5e1; }
+
+/* Focus visible (accessibilité) */
+:focus-visible{
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: .5rem;
+}
