@@ -1,12 +1,19 @@
-// app/layout.tsx
+// src/app/layout.tsx
 import "./globals.css";
+import { Suspense } from "react";
+import ClientFrame from "./ClientFrame";
 
 export const metadata = {
   title: "Capability Dashboard",
-  description: "Tableau de bord CRM (Next + Nest) — analytics & opérations",
+  description:
+    "Tableau de bord CRM (Next + Nest) — analytics & opérations",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="fr" suppressHydrationWarning>
       <body
@@ -23,12 +30,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             }catch(e){}})();`,
           }}
         />
-        {/* Wrapper client : gère l’affichage de la Sidebar */}
-        <ClientFrame>{children}</ClientFrame>
+        {/* ⚠️ Important: tout le rendu (y compris /404) est sous Suspense
+            pour satisfaire l'exigence de Next quand useSearchParams() est utilisé. */}
+        <Suspense fallback={null}>
+          <ClientFrame>{children}</ClientFrame>
+        </Suspense>
       </body>
     </html>
   );
 }
-
-// ⚠️ ce import doit pointer sur un fichier présent dans le même dossier.
-import ClientFrame from "./ClientFrame";
