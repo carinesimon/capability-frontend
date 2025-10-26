@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import clsx from "clsx";
 
-export type Range = { from: string; to: string };
+export type Range = { from: string | Date; to: string | Date };
 
 function fmt(d: dayjs.Dayjs) { return d.format("YYYY-MM-DD"); }
 
