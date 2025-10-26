@@ -741,7 +741,7 @@ export default function BudgetPage() {
           ) : (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-                <div className="card cursor-pointer" onClick={()=>setDrillTitle("") || openLeadsDrill()}>
+                <div className="card cursor-pointer"   onClick={() => { setDrillTitle(""); openLeadsDrill(); }}>
                   <div className="text-[10px] uppercase tracking-wide text-[--muted]">Leads (période)</div>
                   <div className="mt-1 text-2xl font-semibold">{fmtInt(sumLeads)}</div>
                 </div>
