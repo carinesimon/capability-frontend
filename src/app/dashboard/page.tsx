@@ -1270,7 +1270,10 @@ export default function DashboardPage() {
               <div className="card"><div className="text-sm text-[--muted] mb-2">Exports PDF</div>
                 <p className="text-sm text-[--muted]">Télécharge les PDF “Setters” et “Closers” pour la plage de dates choisie ci-dessus.</p>
               </div>
-              <PdfExports from={range.from as Date | undefined} to={range.to as Date | undefined} />
+                <PdfExports
+                  from={typeof range.from === "string" ? range.from : range.from?.toISOString().slice(0, 10)}
+                  to={typeof range.to === "string" ? range.to : range.to?.toISOString().slice(0, 10)}
+                />            
             </div>
           )}
         </div>
@@ -1302,7 +1305,15 @@ export default function DashboardPage() {
                 {/* Personnalisée */}
                 <div>
                   <div className="label">Période personnalisée</div>
-                  <DateRangePicker value={draftRange} onChange={(r)=>setDraftRange({ from: asDate(r.from) ?? undefined, to: asDate(r.to) ?? undefined })} />
+                     <DateRangePicker
+                      value={draftRange}
+                      onChange={(r) =>
+                        setDraftRange({
+                          from: asDate(r.from) ?? r.from, // jamais “undefined”
+                          to:   asDate(r.to)   ?? r.to,   // jamais “undefined”
+                        })
+                      }
+                    />
                 </div>
 
                 <div className="flex items-center justify-between">
