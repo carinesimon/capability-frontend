@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { clearAccessToken } from "@/lib/auth";
 import ThemeToggle from "@/components/ThemeToggle";
+import * as React from "react";
 
 type Role = "ADMIN" | "SETTER" | "CLOSER";
 type Me = { id: string; email: string; role: Role; firstName?: string | null };
@@ -76,7 +77,8 @@ export default function Sidebar() {
 
   const NAV = useMemo(() => {
     const role = me?.role as Role | undefined;
-    const items: { label: string; href: string; icon: JSX.Element }[] = [
+type NavItem = { label: string; href: string; icon: React.ReactNode };
+const items: NavItem[] = [
       { label: "Prospects", href: "/prospects", icon: <IconProspects /> },
     ];
     if (role === "ADMIN") {
