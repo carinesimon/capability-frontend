@@ -7,15 +7,27 @@ import clsx from "clsx";
 
 export type Range = { from: string | Date; to: string | Date };
 
-function fmt(d: dayjs.Dayjs) { return d.format("YYYY-MM-DD"); }
+function fmt(d: dayjs.Dayjs) {
+  return d.format("YYYY-MM-DD");
+}
+
+/** Convertit string|Date en valeur compatible <input type="date"> (YYYY-MM-DD) */
+function toDateInput(d: string | Date | undefined) {
+  if (!d) return "";
+  const x = d instanceof Date ? d : new Date(d);
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, "0");
+  const dd = String(x.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
 
 function presets(): Record<string, Range> {
   const now = dayjs();
   return {
     "Aujourd'hui": { from: fmt(now.startOf("day")), to: fmt(now.endOf("day")) },
-    "7 jours":     { from: fmt(now.subtract(6, "day").startOf("day")), to: fmt(now.endOf("day")) },
-    "30 jours":    { from: fmt(now.subtract(29, "day").startOf("day")), to: fmt(now.endOf("day")) },
-    "Ce mois":     { from: fmt(now.startOf("month")), to: fmt(now.endOf("month")) },
+    "7 jours": { from: fmt(now.subtract(6, "day").startOf("day")), to: fmt(now.endOf("day")) },
+    "30 jours": { from: fmt(now.subtract(29, "day").startOf("day")), to: fmt(now.endOf("day")) },
+    "Ce mois": { from: fmt(now.startOf("month")), to: fmt(now.endOf("month")) },
     "Personnalisé": { from: fmt(now.startOf("month")), to: fmt(now.endOf("month")) },
   };
 }
@@ -56,8 +68,11 @@ export default function DateRangePicker({
             <input
               type="date"
               className="input"
-              value={value.from}
-              onChange={(e) => { setActive("Personnalisé"); onChange({ ...value, from: e.target.value }); }}
+              value={toDateInput(value.from)}
+              onChange={(e) => {
+                setActive("Personnalisé");
+                onChange({ ...value, from: e.target.value });
+              }}
             />
           </div>
           <div>
@@ -65,8 +80,11 @@ export default function DateRangePicker({
             <input
               type="date"
               className="input"
-              value={value.to}
-              onChange={(e) => { setActive("Personnalisé"); onChange({ ...value, to: e.target.value }); }}
+              value={toDateInput(value.to)}
+              onChange={(e) => {
+                setActive("Personnalisé");
+                onChange({ ...value, to: e.target.value });
+              }}
             />
           </div>
         </motion.div>
