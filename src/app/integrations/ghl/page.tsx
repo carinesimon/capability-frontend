@@ -20,6 +20,18 @@ type InboxItem = {
   hash: string;
 };
 
+type ImportMapping = {
+  ghlContactId?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  tag?: string | null;
+  source?: string | null;
+  stageName?: string | undefined;
+  saleValue?: number | null;
+};
+
 type Mapping = Partial<{
   ghlContactId: string;
   firstName: string;
@@ -34,6 +46,8 @@ type Mapping = Partial<{
 }>;
 
 type Defaults = Partial<{
+  /** ✅ ajouté pour éviter l’erreur de type sur defaults.ghlContactId */
+  ghlContactId: string | null;
   firstName: string | null;
   lastName: string | null;
   email: string | null;
@@ -180,7 +194,11 @@ export default function GhlIntegrationsPage() {
     saleValue: "opportunity.monetary_value",
     ghlContactId: "contact.id",
   });
-  const [defaults, setDefaults] = React.useState<Defaults>({ source: "GHL" });
+  const [defaults, setDefaults] = React.useState<Defaults>({
+    source: "GHL",
+    /** optionnel : tu peux aussi mettre un défaut pour l’ID s’il t’en faut un */
+    ghlContactId: null,
+  });
 
   const [submitting, setSubmitting] = React.useState(false);
   const [applyMsg, setApplyMsg] = React.useState<string | null>(null);
