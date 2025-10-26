@@ -1,11 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  eslint: {
-    // Build Vercel jamais bloqué par ESLint
-    ignoreDuringBuilds: true,
-  },
-  // Si un jour TS te bloque en CI, décommente:
-  // typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
+  // typescript: { ignoreBuildErrors: true }, // laisse commenté tant que tu n’en as pas besoin
 };
-
 module.exports = nextConfig;
