@@ -1,41 +1,45 @@
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
-import { LeadStage } from '@prisma/client';
-import { Transform } from 'class-transformer';
+// Front-only DTO: pas de class-validator / class-transformer / Prisma ici.
+// On expose un type souple pour les filtres de recherche côté UI.
 
-export class QueryProspectsDto {
-  @IsOptional()
-  @IsEnum(LeadStage)
-  stage?: LeadStage;
+export type QueryProspectsDto = {
+  // ⚠️ Était LeadStage côté backend : on garde un string côté front
+  stage?: string;
 
-  @IsOptional()
-  @IsString()
-  from?: string; // ISO date
+  // Texte de recherche libre
+  q?: string;
+  search?: string;
 
-  @IsOptional()
-  @IsString()
-  to?: string;   // ISO date
+  // Pagination
+  page?: number;
+  limit?: number;
+  offset?: number;
 
-  @IsOptional()
-  @IsString()
-  q?: string;    // search (name/email/phone/tag)
+  // Tri
+  sort?: string;
+  order?: "asc" | "desc";
 
-  @IsOptional()
-  @IsString()
-  setterId?: string;
+  // Filtres divers
+  assignedToId?: string;
+  from?: string; // ISO yyyy-mm-dd
+  to?: string;   // ISO yyyy-mm-dd
+};
 
-  @IsOptional()
-  @IsString()
-  closerId?: string;
+// (Optionnel) petit helper runtime pour normaliser un objet quelconque
+export function normalizeQueryProspects(input: any): QueryProspectsDto {
+  const n = (v: any) => (v === undefined || v === null || v === "" ? undefined : Number(v));
+  const s = (v: any) => (v === undefined || v === null ? undefined : String(v));
 
-  @IsOptional()
-  @Transform(({ value }) => parseInt(value, 10))
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Transform(({ value }) => parseInt(value, 10))
-  @IsInt()
-  @Min(1)
-  pageSize?: number = 50;
+  return {
+    stage: s(input?.stage),
+    q: s(input?.q),
+    search: s(input?.search),
+    page: n(input?.page),
+    limit: n(input?.limit),
+    offset: n(input?.offset),
+    sort: s(input?.sort),
+    order: input?.order === "desc" ? "desc" : input?.order === "asc" ? "asc" : undefined,
+    assignedToId: s(input?.assignedToId),
+    from: s(input?.from),
+    to: s(input?.to),
+  };
 }
