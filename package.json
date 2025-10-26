@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "prepare": "husky",
     "dev": "next dev --turbopack",
     "build": "next build --turbopack --no-lint",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint . --ext .ts,.tsx"
   },
+  "lint-staged": {
+    "*.{ts,tsx}": ["eslint --max-warnings=0"]
+  }
   "dependencies": {
     "axios": "^1.12.2",
     "clsx": "^2.1.1",
