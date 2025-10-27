@@ -79,8 +79,8 @@ function Spinner() {
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("Admin123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -254,10 +254,6 @@ export default function LoginPage() {
                 </div>
               )}
             </button>
-
-            <div className="text-xs text-white/50">
-              Démo : <b>admin@example.com</b> / <b>Admin123!</b>
-            </div>
           </form>
 
           {/* Bandeau features */}
