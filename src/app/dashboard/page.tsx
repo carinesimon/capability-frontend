@@ -17,27 +17,25 @@ import {
   BarChart, Bar, CartesianGrid, XAxis, YAxis,
   ResponsiveContainer, Tooltip, Legend,
 } from "recharts";
+import { useFunnelMetrics } from "@/hooks/useFunnelMetrics";
 
-// ——— KPI Ratio chip (premium) ———
+/* ---------- KPI Ratio chip ---------- */
 const KpiRatio = ({
   label,
   num = 0,
   den = 0,
-  inverse = false, // pour les no-show (plus c'est bas, mieux c'est)
+  inverse = false,
 }: { label: string; num?: number; den?: number; inverse?: boolean }) => {
   const pct = den ? Math.round((num / den) * 100) : 0;
-  // simple “health” color: vert si bon, rose si mauvais (inverse pour no-show)
   const good =
     den === 0 ? false :
-    inverse ? pct <= 20 : pct >= 50;
+    (inverse ? pct <= 20 : pct >= 50);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-colors px-3 py-2">
       <div className="text-[10px] uppercase tracking-wide text-[--muted]">{label}</div>
       <div className="mt-0.5 flex items-baseline gap-2">
-        <div className={`text-lg font-semibold ${good ? 'text-emerald-300' : 'text-rose-300'}`}>
-          {pct}%
-        </div>
+        <div className={`text-lg font-semibold ${good ? 'text-emerald-300' : 'text-rose-300'}`}>{pct}%</div>
         <div className="text-xs text-[--muted]">
           {(num || 0).toLocaleString('fr-FR')} / {(den || 0).toLocaleString('fr-FR')}
         </div>
@@ -53,8 +51,7 @@ type SetterRow = {
   ttfcAvgMinutes: number | null; revenueFromHisLeads: number;
   spendShare?: number | null;
   cpl: number | null; cpRv0: number | null; cpRv1: number | null; roas: number | null;
-  salesFromHisLeads: number; // <<<<<< nouveau
-
+  salesFromHisLeads: number; // ventes (WON) issues de ses leads
 };
 
 type CloserRow = {
@@ -72,8 +69,6 @@ type DuoRow = {
 };
 
 type LeadsReceivedOut = { total: number; byDay?: Array<{ day: string; count: number }>; };
-
-/** Séries par jour génériques (même forme que leads-received) */
 type MetricSeriesOut = { total: number; byDay?: Array<{ day: string; count: number }> };
 
 type SalesWeeklyItem = { weekStart: string; weekEnd: string; revenue: number; count: number };
@@ -93,17 +88,6 @@ type WeeklyOpsRow = {
   notQualified?: number; lost?: number;
 };
 
-type FunnelTotals = {
-  leads: number; callRequests: number; callsTotal: number; callsAnswered: number; setterNoShow: number;
-  rv0Planned: number; rv0Honored: number; rv0NoShow: number;
-  rv1Planned: number; rv1Honored: number; rv1NoShow: number; rv1Postponed?: number;
-  rv2Planned: number; rv2Honored: number; rv2Postponed?: number;
-  notQualified?: number; lost?: number;
-  wonCount: number;
-};
-type FunnelWeeklyRow = { weekStart: string; weekEnd: string } & FunnelTotals;
-type FunnelOut = { period: { from?: string; to?: string }; totals: Partial<FunnelTotals>; weekly: FunnelWeeklyRow[] };
-
 /* ---------- UI tokens ---------- */
 const COLORS = {
   axis: "rgba(255,255,255,0.7)",
@@ -115,10 +99,89 @@ const COLORS = {
   count: "#F59E0B", countDark: "#D97706",
 };
 /* ---------- Utils ---------- */
+/* ---------- Normalisation Funnel (FR/EN, accents, variantes) ---------- */
+const FUNNEL_TARGETS = [
+  "LEADS_RECEIVED",
+  "CALL_REQUESTED",
+  "CALL_ATTEMPT",
+  "CALL_ANSWERED",
+  "SETTER_NO_SHOW",
+  "RV0_PLANNED",
+  "RV0_HONORED",
+  "RV0_NO_SHOW",
+  "RV1_PLANNED",
+  "RV1_HONORED",
+  "RV1_NO_SHOW",
+  "RV2_PLANNED",
+  "RV2_HONORED",
+  "WON",
+  "LOST",
+  "NOT_QUALIFIED",
+] as const;
+type FunnelKey = typeof FUNNEL_TARGETS[number];
+
+const KEY_ALIASES: Record<FunnelKey, string[]> = {
+  LEADS_RECEIVED: ["LEADS_RECEIVED","LEADS","LEAD","LEAD_RECU","LEAD_REÇU","LEAD_RECEIVED","LEADS_RECU","CONTACTS_CREES","CONTACTS_CRÉÉS"],
+  CALL_REQUESTED: ["CALL_REQUESTED","DEMANDE_APPEL","CALL_REQ","INTENT_RDV","REQUESTED_CALL"],
+  CALL_ATTEMPT:   ["CALL_ATTEMPT","APPEL_PASSE","CALL_MADE","CALLS","APPELS"],
+  CALL_ANSWERED:  ["CALL_ANSWERED","APPEL_REPONDU","APPEL_RÉPONDU","ANSWERED","CONTACTED"],
+  SETTER_NO_SHOW: ["SETTER_NO_SHOW","NO_SHOW_SETTER","NEVER_REACHED_SETTER","UNREACHABLE_SETTER"],
+  RV0_PLANNED:    ["RV0_PLANNED","RV0_PLANIFIE","RV0_PLANIFIÉ","RDV0_PLANIFIE"],
+  RV0_HONORED:    ["RV0_HONORED","RV0_HONORE","RV0_HONORÉ","RDV0_HONORE"],
+  RV0_NO_SHOW:    ["RV0_NO_SHOW","RDV0_NO_SHOW","NO_SHOW_RV0"],
+  RV1_PLANNED:    ["RV1_PLANNED","RV1_PLANIFIE","RV1_PLANIFIÉ","RDV1_PLANIFIE"],
+  RV1_HONORED:    ["RV1_HONORED","RV1_HONORE","RV1_HONORÉ","RDV1_HONORE"],
+  RV1_NO_SHOW:    ["RV1_NO_SHOW","RDV1_NO_SHOW","NO_SHOW_RV1"],
+  RV2_PLANNED:    ["RV2_PLANNED","RV2_PLANIFIE","RV2_PLANIFIÉ","RDV2_PLANIFIE"],
+  RV2_HONORED:    ["RV2_HONORED","RV2_HONORE","RV2_HONORÉ","RDV2_HONORE"],
+  WON:            ["WON","VENTES","SALES","CLOSED_WON"],
+  LOST:           ["LOST","PERDU","CLOSED_LOST"],
+  NOT_QUALIFIED:  ["NOT_QUALIFIED","NON_QUALIFIE","NON_QUALIFIÉ","NQ"],
+};
+
+function normalizeToken(s: string) {
+  return s
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+const ALIAS_LOOKUP: Record<string, FunnelKey> = (() => {
+  const map: Record<string, FunnelKey> = {};
+  for (const tgt of FUNNEL_TARGETS) {
+    const aliases = [tgt, ...(KEY_ALIASES[tgt] || [])];
+    for (const a of aliases) map[normalizeToken(a)] = tgt;
+  }
+  return map;
+})();
+
+/** Prend l'objet brut (ex: `totals` provenant du hook) et renvoie un objet
+ * complet pour le funnel, compatible partout sur la page. */
+function normalizeFunnelTotals(raw: any): Record<FunnelKey, number> {
+  const out: Record<FunnelKey, number> = Object.fromEntries(
+    FUNNEL_TARGETS.map(k => [k, 0])
+  ) as any;
+
+  // Certains backends peuvent mettre les chiffres sous `raw.totals`
+  const src = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw.totals && typeof raw.totals === "object" ? raw.totals : raw)
+    : {};
+
+  for (const [k, v] of Object.entries(src)) {
+    const normK = normalizeToken(k);
+    const target = ALIAS_LOOKUP[normK as keyof typeof ALIAS_LOOKUP];
+    if (target) out[target] = (out[target] || 0) + Number(v || 0);
+  }
+
+  return out;
+}
+
 function asDate(x?: Date | string | null): Date | null { if (!x) return null; const d = x instanceof Date ? x : new Date(x as any); return isNaN(d.getTime()) ? null : d; }
 function toISODate(d: Date | string) { const dd = d instanceof Date ? d : new Date(d); const y = dd.getFullYear(); const m = String(dd.getMonth() + 1).padStart(2, "0"); const day = String(dd.getDate()).padStart(2, "0"); return `${y}-${m}-${day}`; }
 const fmtInt = (n: number) => Math.round(n).toLocaleString("fr-FR");
 const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
+
 /* ---------- Tooltip (Recharts) ---------- */
 function ProTooltip({ active, payload, label, valueFormatters, title }: { active?: boolean; payload?: any[]; label?: string; valueFormatters?: Record<string, (v: number) => string>; title?: string; }) {
   if (!active || !payload || !payload.length) return null;
@@ -141,6 +204,7 @@ function ProTooltip({ active, payload, label, valueFormatters, title }: { active
     </div>
   );
 }
+
 /* ---------- Drill Modal ---------- */
 type DrillItem = {
   leadId: string;
@@ -202,7 +266,7 @@ function DrillModal({ title, open, onClose, rows }: { title: string; open: boole
   );
 }
 
-/* ---------- Funnel (toutes cartes cliquables) ---------- */
+/* ---------- Funnel (cards cliquables) ---------- */
 function Funnel({
   data,
   onCardClick,
@@ -277,6 +341,42 @@ function Trend({ curr, prev, compact }: { curr: number; prev: number; compact?: 
   );
 }
 
+/* ============================= NORMALIZER FUNNEL ============================= */
+/** Normalise les totaux d’événements pour accepter FR/EN et variantes */
+function normalizeTotals(raw: Record<string, number | undefined> | undefined) {
+  const T = raw || {};
+  const pick = (...keys: string[]) => {
+    for (const k of keys) {
+      if (T[k] != null) return Number(T[k]);
+    }
+    return 0;
+  };
+  return {
+    // Entrées de pipeline
+    LEADS_RECEIVED: pick("LEADS_RECEIVED", "LEAD_RECEIVED", "LEAD_RECU", "LEAD_REÇU", "LEADS"),
+    CALL_REQUESTED: pick("CALL_REQUESTED", "DEMANDE_APPEL", "CALL_REQUEST"),
+    CALL_ATTEMPT:   pick("CALL_ATTEMPT", "APPEL_PASSE", "CALLS_TOTAL", "CALL_MADE"),
+    CALL_ANSWERED:  pick("CALL_ANSWERED", "APPEL_REPONDU", "APPEL_RÉPONDU", "CALL_ANSWER"),
+
+    SETTER_NO_SHOW: pick("SETTER_NO_SHOW", "NO_SHOW_SETTER"),
+
+    RV0_PLANNED:    pick("RV0_PLANNED", "RV0_PLANIFIE", "RV0_PLANIFIÉ"),
+    RV0_HONORED:    pick("RV0_HONORED", "RV0_HONORE", "RV0_HONORÉ"),
+    RV0_NO_SHOW:    pick("RV0_NO_SHOW"),
+
+    RV1_PLANNED:    pick("RV1_PLANNED", "RV1_PLANIFIE", "RV1_PLANIFIÉ"),
+    RV1_HONORED:    pick("RV1_HONORED", "RV1_HONORE", "RV1_HONORÉ"),
+    RV1_NO_SHOW:    pick("RV1_NO_SHOW"),
+
+    RV2_PLANNED:    pick("RV2_PLANNED", "RV2_PLANIFIE", "RV2_PLANIFIÉ"),
+    RV2_HONORED:    pick("RV2_HONORED", "RV2_HONORE", "RV2_HONORÉ"),
+
+    WON:            pick("WON"),
+    LOST:           pick("LOST"),
+    NOT_QUALIFIED:  pick("NOT_QUALIFIED", "NON_QUALIFIE", "NON_QUALIFIÉ"),
+  };
+}
+
 /* ============================= PAGE ============================= */
 export default function DashboardPage() {
   const router = useRouter();
@@ -293,6 +393,12 @@ export default function DashboardPage() {
 
   const fromISO = range.from ? toISODate(range.from) : undefined;
   const toISO = range.to ? toISODate(range.to) : undefined;
+  const fromDate = useMemo(() => asDate(range.from) ?? new Date(), [range.from]);
+  const toDate   = useMemo(() => asDate(range.to)   ?? new Date(), [range.to]);
+
+  // Hook funnel (événements d’entrée de stage)
+  const { data: totals = {}, loading: funnelLoading, error: funnelError } =
+    useFunnelMetrics(fromDate, toDate);
 
   // Période précédente (même durée)
   const { prevFromISO, prevToISO } = useMemo(() => {
@@ -300,7 +406,7 @@ export default function DashboardPage() {
     const from = asDate(range.from)!; const to = asDate(range.to)!;
     const span = to.getTime() - from.getTime();
     const prevTo = new Date(from.getTime() - 24 * 3600 * 1000);
-    const prevFrom = new Date(prevTo.getTime() - span); 
+    const prevFrom = new Date(prevTo.getTime() - span);
     return { prevFromISO: toISODate(prevFrom), prevToISO: toISODate(prevTo) };
   }, [range.from, range.to]);
 
@@ -313,7 +419,6 @@ export default function DashboardPage() {
   const [leadsRcv, setLeadsRcv] = useState<LeadsReceivedOut | null>(null);
   const [salesWeekly, setSalesWeekly] = useState<SalesWeeklyItem[]>([]);
   const [ops, setOps] = useState<WeeklyOpsRow[]>([]);
-  const [funnel, setFunnel] = useState<FunnelOut | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [duos, setDuos] = useState<DuoRow[]>([]);
 
@@ -331,21 +436,7 @@ export default function DashboardPage() {
   const [drillTitle, setDrillTitle] = useState("");
   const [drillRows, setDrillRows] = useState<DrillItem[]>([]);
 
-  // Helper : funnel vide
-  const EMPTY_FUNNEL: FunnelOut = {
-    period: { from: fromISO, to: toISO },
-    totals: {
-      leads: 0, callRequests: 0, callsTotal: 0, callsAnswered: 0, setterNoShow: 0,
-      rv0Planned: 0, rv0Honored: 0, rv0NoShow: 0,
-      rv1Planned: 0, rv1Honored: 0, rv1NoShow: 0, rv1Postponed: 0,
-      rv2Planned: 0, rv2Honored: 0, rv2Postponed: 0,
-      notQualified: 0, lost: 0,
-      wonCount: 0,
-    },
-    weekly: [],
-  };
-
-  // Helper fetch "metric/*" safe (retourne null si route absente)
+  // Helper fetch "metric/*" safe
   async function fetchSafeMetric(url: string, params: Record<string, any>) {
     try { return await api.get<MetricSeriesOut>(url, { params }); }
     catch { return { data: null } as any; }
@@ -371,13 +462,12 @@ export default function DashboardPage() {
     async function loadReporting() {
       try {
         setErr(null); setLoading(true);
-        const [sumRes, leadsRes, weeklyRes, opsRes, funnelRes, duosRes] = await Promise.all([
+        const [sumRes, leadsRes, weeklyRes, opsRes, duosRes] = await Promise.all([
           api.get<SummaryOut>("/reporting/summary", { params: { from: fromISO, to: toISO } }),
           api.get<LeadsReceivedOut>("/reporting/leads-received", { params: { from: fromISO, to: toISO } }),
           api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", { params: { from: fromISO, to: toISO } }),
           api.get<{ ok: true; rows: WeeklyOpsRow[] }>("/reporting/weekly-ops", { params: { from: fromISO, to: toISO } }),
-          api.get<FunnelOut>("/reporting/funnel", { params: { from: fromISO, to: toISO } }),
-          api.get<DuoRow[]>("/reporting/duos", { params: { from: fromISO, to: toISO, top: 8 } }), // << NEW
+          api.get<DuoRow[]>("/reporting/duos", { params: { from: fromISO, to: toISO, top: 8 } }),
         ]);
         if (cancelled) return;
         setSummary(sumRes.data || null);
@@ -386,19 +476,7 @@ export default function DashboardPage() {
         setOps((opsRes.data?.rows || []).sort((a,b)=>a.weekStart.localeCompare(b.weekStart)));
         setDuos(duosRes.data || []);
 
-        const fdata = funnelRes.data as Partial<FunnelOut> | null | undefined;
-        if (!fdata || typeof fdata !== "object") {
-          setFunnel(EMPTY_FUNNEL);
-        } else {
-          const mergedTotals = { ...(EMPTY_FUNNEL.totals as any), ...(fdata.totals || {}) };
-          setFunnel({
-            period: fdata.period ?? { from: fromISO, to: toISO },
-            totals: mergedTotals,
-            weekly: Array.isArray(fdata.weekly) ? fdata.weekly : [],
-          });
-        }
-
-        // ---- séries "par jour" (optionnelles, comme leads-received) ----
+        // séries "par jour"
         const [m1, m2, m3] = await Promise.all([
           fetchSafeMetric("/reporting/metric/call-requests", { from: fromISO, to: toISO }),
           fetchSafeMetric("/reporting/metric/calls", { from: fromISO, to: toISO }),
@@ -446,7 +524,6 @@ export default function DashboardPage() {
       } catch (e: any) {
         if (cancelled) return;
         setErr(e?.response?.data?.message || "Erreur de chargement (reporting)");
-        setFunnel(EMPTY_FUNNEL);
       } finally { if (!cancelled) setLoading(false); }
     }
     loadReporting();
@@ -476,35 +553,66 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, [authChecked, authError, fromISO, toISO]);
 
-  // Graphs data
-  const closersChart = useMemo(() => closers.map(c => ({ name: c.name, revenue: c.revenueTotal })), [closers]);
-  const settersChart = useMemo(() => setters.map(s => ({ name: s.name, leads: s.leadsReceived })), [setters]);
-
-  // Tri tableaux
-  const [closerSortBy] = useState<keyof CloserRow>("revenueTotal");
-  const [closerOrder] = useState<"asc" | "desc">("desc");
-  const sortedClosers = useMemo(() => {
-    const arr = [...closers];
-    return arr.sort((a, b) => {
-      const av = (a as any)[closerSortBy] ?? 0; const bv = (b as any)[closerSortBy] ?? 0;
-      return closerOrder === "asc" ? av - bv : bv - av;
+  // Enrichissements (taux) — pas de hooks conditionnels
+  const settersWithRates = useMemo(() => {
+    return setters.map(s => {
+      const qualDen = s.leadsReceived || 0;
+      const qualNum = s.rv1FromHisLeads || 0;
+      const qualificationRate = qualDen ? (qualNum / qualDen) : 0; // 0..1
+      return { ...s, qualificationRate };
     });
-  }, [closers, closerSortBy, closerOrder]);
+  }, [setters]);
 
-  const [setterSortBy] = useState<keyof SetterRow>("rv1FromHisLeads");
-  const [setterOrder] = useState<"asc" | "desc">("desc");
+  const closersWithRates = useMemo(() => {
+    return closers.map(c => {
+      const closingDen = c.rv1Honored || 0;
+      const closingNum = c.salesClosed || 0;
+      const closingRate = closingDen ? (closingNum / closingDen) : 0; // 0..1
+      return { ...c, closingRate };
+    });
+  }, [closers]);
+
+  // Tri — règles demandées
   const sortedSetters = useMemo(() => {
-    const arr = [...setters];
+    const arr = [...settersWithRates];
     return arr.sort((a, b) => {
-      const av = (a as any)[setterSortBy] ?? 0; const bv = (b as any)[setterSortBy] ?? 0;
-      return setterOrder === "asc" ? av - bv : bv - av;
+      if ((b.rv1FromHisLeads||0) !== (a.rv1FromHisLeads||0)) return (b.rv1FromHisLeads||0) - (a.rv1FromHisLeads||0);
+      if ((b.qualificationRate||0) !== (a.qualificationRate||0)) return (b.qualificationRate||0) - (a.qualificationRate||0);
+      return (b.leadsReceived||0) - (a.leadsReceived||0);
     });
-  }, [setters, setterSortBy, setterOrder]);
+  }, [settersWithRates]);
 
-  // KPIs
+  const sortedClosers = useMemo(() => {
+    const arr = [...closersWithRates];
+    return arr.sort((a, b) => {
+      if ((b.closingRate||0) !== (a.closingRate||0)) return (b.closingRate||0) - (a.closingRate||0);
+      if ((b.salesClosed||0) !== (a.salesClosed||0)) return (b.salesClosed||0) - (a.salesClosed||0);
+      return (b.revenueTotal||0) - (a.revenueTotal||0);
+    });
+  }, [closersWithRates]);
+
+  // ================== KPIs (avec fallback robuste) ==================
+  const normalizedTotals = useMemo(() => normalizeTotals(totals as any), [totals]);
+
   const kpiRevenue = summary?.totals?.revenue ?? 0;
-  const kpiLeads = summary?.totals?.leads ?? 0;
-  const kpiRv1Honored = summary?.totals?.rv1Honored ?? 0;
+
+  // Leads: d’abord l’endpoint dédié, sinon fallback sur le funnel normalisé
+  const kpiLeads = (leadsRcv?.total ?? 0) || normalizedTotals.LEADS_RECEIVED || (summary?.totals?.leads ?? 0);
+
+  const kpiRv1Honored = summary?.totals?.rv1Honored ?? normalizedTotals.RV1_HONORED ?? 0;
+
+  // Global rates (affichage)
+  const globalSetterQual = useMemo(() => {
+    const num = settersWithRates.reduce((s, r) => s + (r.rv1FromHisLeads || 0), 0);
+    const den = settersWithRates.reduce((s, r) => s + (r.leadsReceived || 0), 0);
+    return { num, den };
+  }, [settersWithRates]);
+
+  const globalCloserClosing = useMemo(() => {
+    const num = closersWithRates.reduce((s, r) => s + (r.salesClosed || 0), 0);
+    const den = closersWithRates.reduce((s, r) => s + (r.rv1Honored || 0), 0);
+    return { num, den };
+  }, [closersWithRates]);
 
   // Prev (pour Trend)
   const [summaryPrev, setSummaryPrev] = useState<SummaryOut | null>(null);
@@ -546,7 +654,7 @@ export default function DashboardPage() {
     const res: any = await fetchSafe("/reporting/drill/call-requests", { from: fromISO, to: toISO, limit: 2000 });
     setDrillTitle("Demandes d’appel – détail");
     const items: DrillItem[] = res?.data?.items || [];
-    if (res?.data?.__error) items.unshift({ leadId: "__msg__", leadName: res.data.__error } as any);
+    if (res?.data?.__error) items.unshift({ leadId: "**msg**", leadName: res.data.__error } as any);
     setDrillRows(items);
     setDrillOpen(true);
   }
@@ -554,7 +662,7 @@ export default function DashboardPage() {
     const res: any = await fetchSafe("/reporting/drill/calls", { from: fromISO, to: toISO, limit: 2000 });
     setDrillTitle("Appels passés – détail");
     const items: DrillItem[] = res?.data?.items || [];
-    if (res?.data?.__error) items.unshift({ leadId: "__msg__", leadName: res.data.__error } as any);
+    if (res?.data?.__error) items.unshift({ leadId: "**msg**", leadName: res.data.__error } as any);
     setDrillRows(items);
     setDrillOpen(true);
   }
@@ -562,7 +670,7 @@ export default function DashboardPage() {
     const res: any = await fetchSafe("/reporting/drill/calls", { from: fromISO, to: toISO, answered: 1, limit: 2000 });
     setDrillTitle("Appels répondus – détail");
     const items: DrillItem[] = res?.data?.items || [];
-    if (res?.data?.__error) items.unshift({ leadId: "__msg__", leadName: res.data.__error } as any);
+    if (res?.data?.__error) items.unshift({ leadId: "**msg**", leadName: res.data.__error } as any);
     setDrillRows(items);
     setDrillOpen(true);
   }
@@ -570,7 +678,7 @@ export default function DashboardPage() {
     const res: any = await fetchSafe("/reporting/drill/calls", { from: fromISO, to: toISO, setterNoShow: 1, limit: 2000 });
     setDrillTitle("No-show Setter – détail");
     const items: DrillItem[] = res?.data?.items || [];
-    if (res?.data?.__error) items.unshift({ leadId: "__msg__", leadName: res.data.__error } as any);
+    if (res?.data?.__error) items.unshift({ leadId: "**msg**", leadName: res.data.__error } as any);
     setDrillRows(items);
     setDrillOpen(true);
   }
@@ -687,595 +795,600 @@ export default function DashboardPage() {
               onClick={() => onFunnelCardClick("rv1Honored" as any)}>
               <div className="text-xs uppercase tracking-wide text-[--muted]">RV1 honorés</div>
               <div className="mt-2 text-2xl font-semibold">{fmtInt(kpiRv1Honored)}</div>
-              <div className="text-[10px] text-[--muted] mt-1">Clique pour détails par lead</div>
+              <div className="text[10px] text-[--muted] mt-1">Clique pour détails par lead</div>
             </motion.div>
           </div>
-          
- {/* ======== PIPELINE INSIGHTS — Premium OpenAI-style ======== */}
-<div className="relative">
-  {/* Aurora background */}
-  <div className="pointer-events-none absolute inset-0 -z-10">
-    <div className="absolute left-1/2 -translate-x-1/2 -top-24 h-64 w-[70vw] rounded-full blur-3xl opacity-25"
-         style={{ background:'radial-gradient(60% 60% at 50% 50%, rgba(99,102,241,.28), rgba(14,165,233,.15), transparent 70%)' }} />
-  </div>
 
-  {/* Header + Toggle */}
-  <div className="flex items-center justify-between gap-3">
-    <div>
-      <div className="text-xs uppercase tracking-wider text-[--muted]">Pipeline insights</div>
-      <div className="text-[13px] text-[--muted]">Vue synthétique des opérations — leads → appels → RDV → ventes</div>
-    </div>
-
-    {/* pill toggle */}
-    <div className="relative">
-      <div className="flex items-center rounded-full border border-white/10 bg-[rgba(18,24,38,.6)] backdrop-blur-xl p-1">
-        <button
-          type="button"
-          onClick={() => setFunnelOpen(false)}
-          className={`px-3 py-1.5 text-xs rounded-full transition-colors ${!funnelOpen ? 'bg-white/[0.08] border border-white/10' : 'opacity-70 hover:opacity-100'}`}
-        >
-          Aperçu
-        </button>
-        <button
-          type="button"
-          onClick={() => setFunnelOpen(true)}
-          className={`px-3 py-1.5 text-xs rounded-full transition-colors ${funnelOpen ? 'bg-white/[0.08] border border-white/10' : 'opacity-70 hover:opacity-100'}`}
-        >
-          Détails
-        </button>
-      </div>
-    </div>
-  </div>
-
-  {/* Overview strip — compacte quand Funnel est replié */}
-  {(() => {
-    const T = (funnel?.totals as any) ?? {};
-    const chip = (label: string, value: number | string, hint?: string) => (
-      <div className="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-colors px-3 py-2">
-        <div className="text-[10px] uppercase tracking-wide text-[--muted]">{label}</div>
-        <div className="mt-0.5 text-lg font-semibold">{typeof value === 'number' ? value.toLocaleString('fr-FR') : value}</div>
-        {hint && <div className="text-[10px] text-[--muted]">{hint}</div>}
-      </div>
-    );
-    return (
-      <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-        {chip('Leads', T.leads ?? 0)}
-        {chip('Demandes d’appel', T.callRequests ?? 0)}
-        {chip('Appels passés', T.callsTotal ?? 0, T.callsAnswered ? `${Math.round((T.callsAnswered / Math.max(1,T.callsTotal))*100)}% répondus` : undefined)}
-        {chip('RV1 planifiés', T.rv1Planned ?? 0)}
-        {chip('RV1 honorés', T.rv1Honored ?? 0, T.rv1Planned ? `${Math.round((T.rv1Honored/Math.max(1,T.rv1Planned))*100)}% présence` : undefined)}
-        {chip('WON', T.wonCount ?? 0)}
-      </div>
-    );
-  })()}
-
-  {/* Funnel — panneau déroulant “verre” */}
-  <AnimatePresence>
-    {funnelOpen && (
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 6 }}
-        className="mt-3 rounded-3xl border border-white/10 bg-[rgba(18,24,38,.55)] backdrop-blur-xl p-4 overflow-hidden"
-      >
-        {/* bandeau */}
-        <div className="text-xs text-[--muted] mb-3 flex items-center gap-2">
-          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-          Détail du funnel — clique une carte pour le drill
-        </div>
-        {(() => {
-          const T = (funnel?.totals as FunnelTotals) ?? (EMPTY_FUNNEL.totals as FunnelTotals);
-          return (
-            <Funnel
-              data={{
-                leads: T.leads ?? 0,
-                callRequests: T.callRequests ?? 0,
-                callsTotal: T.callsTotal ?? 0,
-                callsAnswered: T.callsAnswered ?? 0,
-                setterNoShow: T.setterNoShow ?? 0,
-                rv0P: T.rv0Planned ?? 0,
-                rv0H: T.rv0Honored ?? 0,
-                rv0NS: T.rv0NoShow ?? 0,
-                rv1P: T.rv1Planned ?? 0,
-                rv1H: T.rv1Honored ?? 0,
-                rv1NS: T.rv1NoShow ?? 0,
-                rv2P: T.rv2Planned ?? 0,
-                rv2H: T.rv2Honored ?? 0,
-                won: T.wonCount ?? 0,
-              }}
-              onCardClick={onFunnelCardClick}
-            />
-          );
-        })()}
-        {/* Ratios avancés du funnel */}
-{(() => {
-  const T = (funnel?.totals as any) ?? {};
-  return (
-    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-      <KpiRatio label="Lead → Demande d’appel" num={T.callRequests ?? 0} den={T.leads ?? 0} />
-      <KpiRatio label="Demande → Appel passé" num={T.callsTotal ?? 0} den={T.callRequests ?? 0} />
-      <KpiRatio label="Appel → Contact (répondu)" num={T.callsAnswered ?? 0} den={T.callsTotal ?? 0} />
-      <KpiRatio label="Contact → RV0 planifié" num={T.rv0Planned ?? 0} den={T.callsAnswered ?? 0} />
-
-      <KpiRatio label="RV0 honoré / planifié" num={T.rv0Honored ?? 0} den={T.rv0Planned ?? 0} />
-      <KpiRatio label="RV0 no-show / planifié" num={T.rv0NoShow ?? 0} den={T.rv0Planned ?? 0} inverse />
-
-      <KpiRatio label="RV0 honoré → RV1 planifié" num={T.rv1Planned ?? 0} den={T.rv0Honored ?? 0} />
-      <KpiRatio label="RV1 honoré / planifié" num={T.rv1Honored ?? 0} den={T.rv1Planned ?? 0} />
-      <KpiRatio label="RV1 no-show / planifié" num={T.rv1NoShow ?? 0} den={T.rv1Planned ?? 0} inverse />
-
-      <KpiRatio label="RV2 honoré / planifié" num={T.rv2Honored ?? 0} den={T.rv2Planned ?? 0} />
-      <KpiRatio label="Conversion finale (WON / Leads)" num={T.wonCount ?? 0} den={T.leads ?? 0} />
-    </div>
-  );
-})()}
-
-      </motion.div>
-    )}
-  </AnimatePresence>
-
-  {/* ===== Charts Deck (verre + halos) ===== */}
-  <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-    {/* Leads reçus */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
-      <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
-      <div className="flex items-center justify-between">
-        <div className="font-medium">Leads reçus par jour</div>
-        <div className="text-xs text-[--muted]">{(leadsRcv?.total ?? 0).toLocaleString('fr-FR')} au total</div>
-      </div>
-      <div className="h-64 mt-2">
-        {leadsRcv?.byDay?.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={leadsRcv.byDay.map(d => ({ day: new Date(d.day).toLocaleDateString("fr-FR"), count: d.count }))} margin={{ left: 8, right: 8, top: 10, bottom: 0 }}>
-              <defs>
-                <linearGradient id="gradLeads" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={COLORS.leads} stopOpacity={0.95} />
-                  <stop offset="100%" stopColor={COLORS.leadsDark} stopOpacity={0.7} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
-              <XAxis dataKey="day" tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <Tooltip content={<ProTooltip title="Leads" valueFormatters={{ count: (v) => fmtInt(v) }} />} />
-              <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
-              <Bar name="Leads" dataKey="count" fill="url(#gradLeads)" radius={[8,8,0,0]} maxBarSize={38} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Pas de données.</div>}
-      </div>
-      <div className="text-[11px] text-[--muted] mt-2">Basé sur la <b>date de création</b> du contact.</div>
-    </div>
-
-    {/* CA hebdo (WON) */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
-      <div className="absolute -left-16 -top-10 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
-      <div className="flex items-center justify-between">
-        <div className="font-medium">Production hebdomadaire (ventes gagnées)</div>
-        <div className="text-xs text-[--muted]">
-          {(salesWeekly.reduce((s, w) => s + (w.revenue || 0), 0) || 0).toLocaleString('fr-FR')} €
-        </div>
-      </div>
-      <div className="h-64 mt-2">
-        {salesWeekly.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={salesWeekly.map(w => ({
-                label: new Date(w.weekStart).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) +
-                       " → " + new Date(w.weekEnd).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
-                revenue: Math.round(w.revenue), count: w.count,
-              }))}
-              margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={COLORS.revenue} stopOpacity={0.95} />
-                  <stop offset="100%" stopColor={COLORS.revenueDark} stopOpacity={0.7} />
-                </linearGradient>
-                <linearGradient id="gradCount" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={COLORS.count} stopOpacity={0.95} />
-                  <stop offset="100%" stopColor={COLORS.countDark} stopOpacity={0.7} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
-              <XAxis dataKey="label" tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <YAxis yAxisId="left" tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <Tooltip content={<ProTooltip title="Hebdo" valueFormatters={{ revenue: (v)=>fmtEUR(v), count: (v)=>fmtInt(v) }} />} />
-              <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
-              <Bar yAxisId="left" name="CA (WON)" dataKey="revenue" fill="url(#gradRevenue)" radius={[8,8,0,0]} maxBarSize={44} />
-              <Bar yAxisId="right" name="Ventes" dataKey="count" fill="url(#gradCount)" radius={[8,8,0,0]} maxBarSize={44} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Aucune production hebdo.</div>}
-      </div>
-      <div className="text-[11px] text-[--muted] mt-2">Basé sur la <b>date de passage en WON</b>.</div>
-    </div>
-
-    {/* Call requests */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
-      <div className="flex items-center justify-between">
-        <div className="font-medium">Demandes d’appel par jour</div>
-        <div className="text-xs text-[--muted]">{(mCallReq?.total ?? 0).toLocaleString('fr-FR')}</div>
-      </div>
-      <div className="h-64 mt-2">
-        {mCallReq?.byDay?.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={mCallReq.byDay.map(d => ({ day: new Date(d.day).toLocaleDateString("fr-FR"), count: d.count }))}
-              margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient id="gradCallReq" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.95} />
-                  <stop offset="100%" stopColor="#0e7490" stopOpacity={0.7} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
-              <XAxis dataKey="day" tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <Tooltip content={<ProTooltip title="Demandes d’appel" valueFormatters={{ count: (v)=>fmtInt(v) }} />} />
-              <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
-              <Bar name="Demandes" dataKey="count" fill="url(#gradCallReq)" radius={[8,8,0,0]} maxBarSize={38} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Pas de données.</div>}
-      </div>
-      <div className="text-[11px] text-[--muted] mt-2">Basé sur <b>CallRequest.requestedAt</b>.</div>
-    </div>
-
-    {/* Calls total vs answered */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
-      <div className="flex items-center justify-between">
-        <div className="font-medium">Appels passés & répondus par jour</div>
-        <div className="text-xs text-[--muted]">
-          {(mCallsTotal?.total ?? 0).toLocaleString('fr-FR')} / {(mCallsAnswered?.total ?? 0).toLocaleString('fr-FR')}
-        </div>
-      </div>
-      <div className="h-64 mt-2">
-        {(mCallsTotal?.byDay?.length || mCallsAnswered?.byDay?.length) ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={(mCallsTotal?.byDay || []).map(d => {
-                const label = new Date(d.day).toLocaleDateString("fr-FR");
-                const answered = mCallsAnswered?.byDay?.find(x => new Date(x.day).toDateString() === new Date(d.day).toDateString())?.count ?? 0;
-                return { day: label, total: d.count, answered };
-              })}
-              margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient id="gradCallsTotal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.95} />
-                  <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.7} />
-                </linearGradient>
-                <linearGradient id="gradCallsAnswered" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#34d399" stopOpacity={0.95} />
-                  <stop offset="100%" stopColor="#059669" stopOpacity={0.7} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
-              <XAxis dataKey="day" tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <Tooltip content={<ProTooltip title="Appels" valueFormatters={{ total: fmtInt, answered: fmtInt }} />} />
-              <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
-              <Bar name="Passés" dataKey="total" fill="url(#gradCallsTotal)" radius={[8,8,0,0]} maxBarSize={40} />
-              <Bar name="Répondus" dataKey="answered" fill="url(#gradCallsAnswered)" radius={[8,8,0,0]} maxBarSize={40} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Pas de données.</div>}
-      </div>
-      <div className="text-[11px] text-[--muted] mt-2">Basé sur <b>CallAttempt.startedAt</b> et <b>CallOutcome=ANSWERED</b>.</div>
-    </div>
-
-    {/* RV0 no-show weekly */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
-      <div className="flex items-center justify-between">
-        <div className="font-medium">RV0 no-show par semaine</div>
-        <div className="text-xs text-[--muted]">{rv0NsWeekly.reduce((s,x)=>s+(x.count||0),0).toLocaleString('fr-FR')}</div>
-      </div>
-      <div className="h-64 mt-2">
-        {rv0NsWeekly.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rv0NsWeekly} margin={{ left: 8, right: 8, top: 10, bottom: 0 }}>
-              <defs>
-                <linearGradient id="gradRv0Ns" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.95} />
-                  <stop offset="100%" stopColor="#b91c1c" stopOpacity={0.7} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
-              <XAxis dataKey="label" tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
-              <Tooltip content={<ProTooltip title="RV0 no-show" valueFormatters={{ count: (v)=>fmtInt(v) }} />} />
-              <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
-              <Bar
-                name="RV0 no-show"
-                dataKey="count"
-                fill="url(#gradRv0Ns)"
-                radius={[8,8,0,0]}
-                maxBarSize={44}
-                onClick={(d: any) => {
-                  if (!d?.activeLabel) return;
-                  const row = rv0NsWeekly.find(x => x.label === d.activeLabel);
-                  if (!row) return;
-                  openAppointmentsDrill({
-                    title: `RV0 no-show – semaine ${row.label}`,
-                    type: "RV0", status: "NO_SHOW",
-                    from: row.weekStart.slice(0,10), to: row.weekEnd.slice(0,10),
-                  });
-                }}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex h-full items-center justify-center text-[--muted] text-sm">Aucun no-show RV0 sur la période.</div>
-        )}
-      </div>
-      <div className="text-[11px] text-[--muted] mt-2">
-        Compté sur la <b>date/heure du RDV</b> : chaque barre = lundi → dimanche.
-      </div>
-    </div>
-  </div>
-</div>
-
-  {/* Classements */}
-{/* ======== PREMIUM DISPOSITION (OpenAI-style) ======== */}
-<div className="relative mt-6">
-  {/* Aurora background */}
-  <div className="absolute inset-0 -z-10">
-    <div className="pointer-events-none absolute -top-24 left-1/3 h-72 w-[60vw] rounded-full blur-3xl opacity-25"
-         style={{ background: 'radial-gradient(60% 60% at 50% 50%, rgba(99,102,241,.35), rgba(14,165,233,.15), transparent 70%)' }} />
-    <div className="pointer-events-none absolute -bottom-16 -left-20 h-60 w-96 rounded-full blur-3xl opacity-20"
-         style={{ background: 'radial-gradient(50% 50% at 50% 50%, rgba(56,189,248,.35), rgba(59,130,246,.15), transparent 70%)' }} />
-  </div>
-
-  {/* HALL OF FAME — Top cards */}
-  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-    {/* Top Closer */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
-      <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/[0.04] blur-2xl" />
-      <div className="flex items-center gap-3">
-        <div className="h-11 w-11 rounded-2xl bg-emerald-400/10 border border-emerald-400/25 flex items-center justify-center">👑</div>
-        <div>
-          <div className="text-xs uppercase tracking-wider text-emerald-300/80">Hall of Fame</div>
-          <div className="text-lg font-semibold">Top Closer</div>
-        </div>
-        <div className="ml-auto text-right text-xs text-[--muted]">CA (WON)</div>
-      </div>
-      <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-        {sortedClosers[0] ? (
-          <div className="flex items-center gap-3">
-            <div className="text-2xl leading-none">🥇</div>
-            <div className="min-w-0">
-              <div className="font-medium truncate">{sortedClosers[0].name}</div>
-              <div className="text-xs text-[--muted] truncate">{sortedClosers[0].email}</div>
+          {/* ===== Pipeline insights ===== */}
+          <div className="relative">
+            <div className="pointer-events-none absolute inset-0 -z-10">
+              <div className="absolute left-1/2 -translate-x-1/2 -top-24 h-64 w-[70vw] rounded-full blur-3xl opacity-25"
+                style={{ background:'radial-gradient(60% 60% at 50% 50%, rgba(99,102,241,.28), rgba(14,165,233,.15), transparent 70%)' }} />
             </div>
-            <div className="ml-auto text-right">
-              <div className="text-lg font-semibold">{(sortedClosers[0].revenueTotal || 0).toLocaleString('fr-FR')} €</div>
-              <div className="text-[10px] text-[--muted]">{sortedClosers[0].salesClosed} ventes</div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-[--muted]">— Aucune donnée</div>
-        )}
-      </div>
-    </div>
 
-    {/* Top Setter */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
-      <div className="absolute -right-10 -top-8 w-40 h-40 rounded-full bg-indigo-400/10 blur-2xl" />
-      <div className="flex items-center gap-3">
-        <div className="h-11 w-11 rounded-2xl bg-indigo-400/10 border border-indigo-400/25 flex items-center justify-center">⚡</div>
-        <div>
-          <div className="text-xs uppercase tracking-wider text-indigo-300/80">Hall of Fame</div>
-          <div className="text-lg font-semibold">Top Setter</div>
-        </div>
-        <div className="ml-auto text-right text-xs text-[--muted]">TTFC & RV1</div>
-      </div>
-      <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-        {sortedSetters[0] ? (
-          <div className="flex items-center gap-3">
-            <div className="text-2xl leading-none">🥇</div>
-            <div className="min-w-0">
-              <div className="font-medium truncate">{sortedSetters[0].name}</div>
-              <div className="text-xs text-[--muted] truncate">{sortedSetters[0].email}</div>
-            </div>
-            <div className="ml-auto text-right">
-              <div className="text-lg font-semibold">{sortedSetters[0].ttfcAvgMinutes ?? "—"} min</div>
-              <div className="text-[10px] text-[--muted]">{sortedSetters[0].rv1FromHisLeads} RV1</div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-[--muted]">— Aucune donnée</div>
-        )}
-      </div>
-    </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-wider text-[--muted]">Pipeline insights</div>
+                <div className="text-[13px] text-[--muted]">Vue synthétique des opérations — leads → appels → RDV → ventes</div>
+              </div>
 
-    {/* Top Duo */}
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
-      <div className="absolute right-0 bottom-0 w-40 h-40 rounded-full bg-amber-400/10 blur-2xl" />
-      <div className="flex items-center gap-3">
-        <div className="h-11 w-11 rounded-2xl bg-amber-400/10 border border-amber-400/25 flex items-center justify-center">💎</div>
-        <div>
-          <div className="text-xs uppercase tracking-wider text-amber-300/80">Hall of Fame</div>
-          <div className="text-lg font-semibold">Équipe de choc</div>
-        </div>
-        <div className="ml-auto text-right text-xs text-[--muted]">CA & Ventes</div>
-      </div>
-      <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-        {duos?.[0] ? (
-          <div className="grid grid-cols-2 gap-3 items-center">
-            <div className="min-w-0">
-              <div className="text-xs text-[--muted]">Setter</div>
-              <div className="font-medium truncate">{duos[0].setterName}</div>
-              <div className="text-[10px] text-[--muted] truncate">{duos[0].setterEmail}</div>
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs text-[--muted]">Closer</div>
-              <div className="font-medium truncate">{duos[0].closerName}</div>
-              <div className="text-[10px] text-[--muted] truncate">{duos[0].closerEmail}</div>
-            </div>
-            <div className="col-span-2 flex items-center justify-between">
-              <div className="text-lg font-semibold">{fmtEUR(duos[0].revenue)}</div>
-              <div className="text-[10px] text-[--muted]">{duos[0].salesCount} ventes • RV1 {duos[0].rv1Honored}/{duos[0].rv1Planned}</div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-[--muted]">— Aucune donnée</div>
-        )}
-      </div>
-    </div>
-  </div>
-
-  {/* SPOTLIGHT LISTS — Closers & Setters */}
-  <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
-    {/* Spotlight Closers */}
-    <div className="rounded-3xl border border-white/10 bg-[rgba(18,24,38,.6)] backdrop-blur-xl overflow-hidden">
-      <div className="px-4 py-2 text-xs uppercase tracking-wider border-b border-white/10 bg-[linear-gradient(90deg,rgba(16,185,129,.15),transparent)]">
-        👥 Spotlight Closers
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px]">
-          <thead className="text-left text-[--muted] text-xs sticky top-0 bg-[rgba(18,24,38,.8)] backdrop-blur-md">
-            <tr>
-              <th className="py-2.5 px-3">Closer</th>
-              <th className="py-2.5 px-3">CA</th>
-              <th className="py-2.5 px-3">Ventes</th>
-              <th className="py-2.5 px-3">RV1 honorés</th>
-              <th className="py-2.5 px-3">ROAS (honorés)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedClosers.slice(0, 8).map((c, i) => (
-              <tr key={c.userId} className="border-t border-white/10 hover:bg-white/[0.04] transition-colors">
-                <td className="py-2.5 px-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[--muted] w-5">{i < 3 ? ['🥇','🥈','🥉'][i] : `#${i+1}`}</span>
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{c.name}</div>
-                      <div className="text-[10px] text-[--muted] truncate">{c.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="py-2.5 px-3 font-semibold">{(c.revenueTotal || 0).toLocaleString('fr-FR')} €</td>
-                <td className="py-2.5 px-3">{c.salesClosed}</td>
-                <td className="py-2.5 px-3">{c.rv1Honored}</td>
-                <td className="py-2.5 px-3">{c.roasHonored ?? '—'}</td>
-              </tr>
-            ))}
-            {!sortedClosers.length && (
-              <tr><td className="py-6 px-3 text-[--muted]" colSpan={5}>Aucune donnée.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    {/* Spotlight Setters */}
-    <div className="rounded-3xl border border-white/10 bg-[rgba(18,24,38,.6)] backdrop-blur-xl overflow-hidden">
-      <div className="px-4 py-2 text-xs uppercase tracking-wider border-b border-white/10 bg-[linear-gradient(90deg,rgba(99,102,241,.18),transparent)]">
-        ☎️ Spotlight Setters
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[780px]">
-          <thead className="text-left text-[--muted] text-xs sticky top-0 bg-[rgba(18,24,38,.8)] backdrop-blur-md">
-            <tr>
-              <th className="py-2.5 px-3">Setter</th>
-              <th className="py-2.5 px-3">Ventes (ses leads)</th>
-              <th className="py-2.5 px-3">RV1 (ses leads)</th>
-              <th className="py-2.5 px-3">Leads</th>
-              <th className="py-2.5 px-3">RV0</th>
-              <th className="py-2.5 px-3">TTFC</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedSetters.slice(0, 8).map((s, i) => (
-              <tr key={s.userId} className="border-t border-white/10 hover:bg-white/[0.04] transition-colors">
-                <td className="py-2.5 px-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[--muted] w-5">{i < 3 ? ['🥇','🥈','🥉'][i] : `#${i+1}`}</span>
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{s.name}</div>
-                      <div className="text-[10px] text-[--muted] truncate">{s.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="py-2.5 px-3">{s.salesFromHisLeads ?? 0}</td>
-                <td className="py-2.5 px-3">{s.rv1FromHisLeads ?? 0}</td>
-                <td className="py-2.5 px-3">{s.leadsReceived ?? 0}</td>
-                <td className="py-2.5 px-3">{s.rv0Count ?? 0}</td>
-                <td className="py-2.5 px-3">{s.ttfcAvgMinutes ?? '—'} min</td>
-              </tr>
-            ))}
-            {!sortedSetters.length && (
-              <tr><td className="py-6 px-3 text-[--muted]" colSpan={6}>Aucune donnée.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  {/* DUO STRIP — Marquee premium */}
-  {duos.length > 0 && (
-    <div className="mt-5 rounded-3xl border border-white/10 bg-[rgba(13,18,29,.7)] backdrop-blur-xl overflow-hidden">
-      <div className="px-4 py-2 text-xs uppercase tracking-wider border-b border-white/10 bg-[linear-gradient(90deg,rgba(251,191,36,.18),transparent)]">
-        💠 Équipe de choc — meilleurs duos
-      </div>
-
-      <div className="relative">
-        <div className="flex gap-3 p-3 overflow-x-auto snap-x">
-          {duos.map((d, i) => {
-            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
-            const tone =
-              i === 0 ? 'border-emerald-400/30 bg-emerald-400/10'
-              : i === 1 ? 'border-indigo-400/30 bg-indigo-400/10'
-              : i === 2 ? 'border-amber-400/30 bg-amber-400/10'
-              : 'border-white/10 bg-white/[0.04]';
-            return (
-              <div
-                key={d.setterId + '_' + d.closerId}
-                className={`snap-start shrink-0 min-w-[300px] rounded-2xl border ${tone} px-3 py-2`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">{medal || '💎'}</span>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{d.setterName} × {d.closerName}</div>
-                    <div className="text-[10px] text-[--muted] truncate">{d.setterEmail} • {d.closerEmail}</div>
-                  </div>
-                  <div className="ml-auto text-right text-sm font-semibold">{fmtEUR(d.revenue)}</div>
+              <div className="relative">
+                <div className="flex items-center rounded-full border border-white/10 bg-[rgba(18,24,38,.6)] backdrop-blur-xl p-1">
+                  <button
+                    type="button"
+                    onClick={() => setFunnelOpen(false)}
+                    className={`px-3 py-1.5 text-xs rounded-full transition-colors ${!funnelOpen ? 'bg-white/[0.08] border border-white/10' : 'opacity-70 hover:opacity-100'}`}
+                  >
+                    Aperçu
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFunnelOpen(true)}
+                    className={`px-3 py-1.5 text-xs rounded-full transition-colors ${funnelOpen ? 'bg-white/[0.08] border border-white/10' : 'opacity-70 hover:opacity-100'}`}
+                  >
+                    Détails
+                  </button>
                 </div>
-                <div className="mt-1 flex items-center gap-2 text-[11px] text-[--muted]">
-                  <span className="px-1.5 py-0.5 rounded border border-white/10 bg-black/20">{d.salesCount} ventes</span>
-                  <span className="px-1.5 py-0.5 rounded border border-white/10 bg-black/20">RV1 {d.rv1Honored}/{d.rv1Planned}</span>
-                  {d.rv1HonorRate != null && (
-                    <span className="px-1.5 py-0.5 rounded border border-white/10 bg-black/20">{d.rv1HonorRate}%</span>
+              </div>
+            </div>
+
+            {/* Aperçu */}
+            {(() => {
+              const N = normalizeTotals(totals as any);
+              const chip = (label: string, value: number | string, hint?: string) => (
+                <div className="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-colors px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-[--muted]">{label}</div>
+                  <div className="mt-0.5 text-lg font-semibold">{typeof value === 'number' ? value.toLocaleString('fr-FR') : value}</div>
+                  {hint && <div className="text-[10px] text-[--muted]">{hint}</div>}
+                </div>
+              );
+              if (funnelLoading) {
+                return <div className="mt-3 text-[--muted] text-sm">Chargement des métriques du funnel…</div>;
+              }
+              if (funnelError) {
+                return <div className="mt-3 text-rose-300 text-sm">Erreur funnel: {String(funnelError)}</div>;
+              }
+              return (
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                  {chip('Leads', (leadsRcv?.total ?? 0) || N.LEADS_RECEIVED)}
+                  {chip('Demandes d’appel', N.CALL_REQUESTED)}
+                  {chip('Appels passés', N.CALL_ATTEMPT, N.CALL_ANSWERED ? `${Math.round((N.CALL_ANSWERED / Math.max(1, N.CALL_ATTEMPT)) * 100)}% répondus` : undefined)}
+                  {chip('RV1 planifiés', N.RV1_PLANNED)}
+                  {chip('RV1 honorés', N.RV1_HONORED, N.RV1_PLANNED ? `${Math.round((N.RV1_HONORED/Math.max(1,N.RV1_PLANNED))*100)}% présence` : undefined)}
+                  {chip('WON', N.WON)}
+                </div>
+              );
+            })()}
+
+            {/* Détails du funnel */}
+            <AnimatePresence>
+              {funnelOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 6 }}
+                  className="mt-3 rounded-3xl border border-white/10 bg-[rgba(18,24,38,.55)] backdrop-blur-xl p-4 overflow-hidden"
+                >
+                  <div className="text-xs text-[--muted] mb-3 flex items-center gap-2">
+                    <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
+                    Détail du funnel — clique une carte pour le drill
+                  </div>
+                  {(() => {
+                    const N = normalizeTotals(totals as any);
+                    return (
+                      <Funnel
+                        data={{
+                          leads: (leadsRcv?.total ?? 0) || N.LEADS_RECEIVED,
+                          callRequests: N.CALL_REQUESTED,
+                          callsTotal: N.CALL_ATTEMPT,
+                          callsAnswered: N.CALL_ANSWERED,
+                          setterNoShow: N.SETTER_NO_SHOW,
+                          rv0P: N.RV0_PLANNED,
+                          rv0H: N.RV0_HONORED,
+                          rv0NS: N.RV0_NO_SHOW,
+                          rv1P: N.RV1_PLANNED,
+                          rv1H: N.RV1_HONORED,
+                          rv1NS: N.RV1_NO_SHOW,
+                          rv2P: N.RV2_PLANNED,
+                          rv2H: N.RV2_HONORED,
+                          won: N.WON,
+                        }}
+                        onCardClick={onFunnelCardClick}
+                      />
+                    );
+                  })()}
+
+                  {/* Ratios avancés */}
+                  {(() => {
+                    const N = normalizeTotals(totals as any);
+                    return (
+                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                        <KpiRatio label="Lead → Demande d’appel" num={N.CALL_REQUESTED} den={(leadsRcv?.total ?? 0) || N.LEADS_RECEIVED} />
+                        <KpiRatio label="Demande → Appel passé" num={N.CALL_ATTEMPT} den={N.CALL_REQUESTED} />
+                        <KpiRatio label="Appel → Contact (répondu)" num={N.CALL_ANSWERED} den={N.CALL_ATTEMPT} />
+                        <KpiRatio label="Contact → RV0 planifié" num={N.RV0_PLANNED} den={N.CALL_ANSWERED} />
+
+                        <KpiRatio label="RV0 honoré / planifié" num={N.RV0_HONORED} den={N.RV0_PLANNED} />
+                        <KpiRatio label="RV0 no-show / planifié" num={N.RV0_NO_SHOW} den={N.RV0_PLANNED} inverse />
+
+                        <KpiRatio label="RV0 honoré → RV1 planifié" num={N.RV1_PLANNED} den={N.RV0_HONORED} />
+                        <KpiRatio label="RV1 honoré / planifié" num={N.RV1_HONORED} den={N.RV1_PLANNED} />
+                        <KpiRatio label="RV1 no-show / planifié" num={N.RV1_NO_SHOW} den={N.RV1_PLANNED} inverse />
+
+                        <KpiRatio label="RV2 honoré / planifié" num={N.RV2_HONORED} den={N.RV2_PLANNED} />
+                        <KpiRatio label="Conversion finale (WON / Leads)" num={N.WON} den={(leadsRcv?.total ?? 0) || N.LEADS_RECEIVED} />
+                      </div>
+                    );
+                  })()}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Cartes globales des taux demandés */}
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+              <KpiRatio label="Taux qualification (global setting)" num={globalSetterQual.num} den={globalSetterQual.den} />
+              <KpiRatio label="Taux closing (global closers)" num={globalCloserClosing.num} den={globalCloserClosing.den} />
+            </div>
+          </div>
+
+          {/* ===== Charts Deck ===== */}
+          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {/* Leads reçus */}
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
+              <div className="flex items-center justify-between">
+                <div className="font-medium">Leads reçus par jour</div>
+                <div className="text-xs text-[--muted]">{(leadsRcv?.total ?? 0).toLocaleString('fr-FR')} au total</div>
+              </div>
+              <div className="h-64 mt-2">
+                {leadsRcv?.byDay?.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={leadsRcv.byDay.map(d => ({ day: new Date(d.day).toLocaleDateString("fr-FR"), count: d.count }))} margin={{ left: 8, right: 8, top: 10, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="gradLeads" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={COLORS.leads} stopOpacity={0.95} />
+                          <stop offset="100%" stopColor={COLORS.leadsDark} stopOpacity={0.7} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+                      <XAxis dataKey="day" tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <Tooltip content={<ProTooltip title="Leads" valueFormatters={{ count: (v) => fmtInt(v) }} />} />
+                      <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+                      <Bar name="Leads" dataKey="count" fill="url(#gradLeads)" radius={[8,8,0,0]} maxBarSize={38} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Pas de données.</div>}
+              </div>
+              <div className="text-[11px] text-[--muted] mt-2">Basé sur la <b>date de création</b> du contact.</div>
+            </div>
+
+            {/* CA hebdo (WON) */}
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="absolute -left-16 -top-10 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
+              <div className="flex items-center justify-between">
+                <div className="font-medium">Production hebdomadaire (ventes gagnées)</div>
+                <div className="text-xs text-[--muted]">
+                  {(salesWeekly.reduce((s, w) => s + (w.revenue || 0), 0) || 0).toLocaleString('fr-FR')} €
+                </div>
+              </div>
+              <div className="h-64 mt-2">
+                {salesWeekly.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={salesWeekly.map(w => ({
+                        label: new Date(w.weekStart).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) +
+                               " → " + new Date(w.weekEnd).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
+                        revenue: Math.round(w.revenue), count: w.count,
+                      }))}
+                      margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={COLORS.revenue} stopOpacity={0.95} />
+                          <stop offset="100%" stopColor={COLORS.revenueDark} stopOpacity={0.7} />
+                        </linearGradient>
+                        <linearGradient id="gradCount" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={COLORS.count} stopOpacity={0.95} />
+                          <stop offset="100%" stopColor={COLORS.countDark} stopOpacity={0.7} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+                      <XAxis dataKey="label" tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <YAxis yAxisId="left" tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <Tooltip content={<ProTooltip title="Hebdo" valueFormatters={{ revenue: (v)=>fmtEUR(v), count: (v)=>fmtInt(v) }} />} />
+                      <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+                      <Bar yAxisId="left" name="CA (WON)" dataKey="revenue" fill="url(#gradRevenue)" radius={[8,8,0,0]} maxBarSize={44} />
+                      <Bar yAxisId="right" name="Ventes" dataKey="count" fill="url(#gradCount)" radius={[8,8,0,0]} maxBarSize={44} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Aucune production hebdo.</div>}
+              </div>
+              <div className="text-[11px] text-[--muted] mt-2">Basé sur la <b>date de passage en WON</b>.</div>
+            </div>
+
+            {/* Call requests */}
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="flex items-center justify-between">
+                <div className="font-medium">Demandes d’appel par jour</div>
+                <div className="text-xs text-[--muted]">{(mCallReq?.total ?? 0).toLocaleString('fr-FR')}</div>
+              </div>
+              <div className="h-64 mt-2">
+                {mCallReq?.byDay?.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={mCallReq.byDay.map(d => ({ day: new Date(d.day).toLocaleDateString("fr-FR"), count: d.count }))}
+                      margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="gradCallReq" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#0e7490" stopOpacity={0.7} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+                      <XAxis dataKey="day" tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <Tooltip content={<ProTooltip title="Demandes d’appel" valueFormatters={{ count: (v)=>fmtInt(v) }} />} />
+                      <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+                      <Bar name="Demandes" dataKey="count" fill="url(#gradCallReq)" radius={[8,8,0,0]} maxBarSize={38} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Pas de données.</div>}
+              </div>
+              <div className="text-[11px] text-[--muted] mt-2">Basé sur <b>CallRequest.requestedAt</b>.</div>
+            </div>
+
+            {/* Calls total vs answered */}
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="flex items-center justify-between">
+                <div className="font-medium">Appels passés & répondus par jour</div>
+                <div className="text-xs text-[--muted]">
+                  {(mCallsTotal?.total ?? 0).toLocaleString('fr-FR')} / {(mCallsAnswered?.total ?? 0).toLocaleString('fr-FR')}
+                </div>
+              </div>
+              <div className="h-64 mt-2">
+                {(mCallsTotal?.byDay?.length || mCallsAnswered?.byDay?.length) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={(mCallsTotal?.byDay || []).map(d => {
+                        const label = new Date(d.day).toLocaleDateString("fr-FR");
+                        const answered = mCallsAnswered?.byDay?.find(x => new Date(x.day).toDateString() === new Date(d.day).toDateString())?.count ?? 0;
+                        return { day: label, total: d.count, answered };
+                      })}
+                      margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="gradCallsTotal" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.7} />
+                        </linearGradient>
+                        <linearGradient id="gradCallsAnswered" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#34d399" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#059669" stopOpacity={0.7} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+                      <XAxis dataKey="day" tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <Tooltip content={<ProTooltip title="Appels" valueFormatters={{ total: fmtInt, answered: fmtInt }} />} />
+                      <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+                      <Bar name="Passés" dataKey="total" fill="url(#gradCallsTotal)" radius={[8,8,0,0]} maxBarSize={40} />
+                      <Bar name="Répondus" dataKey="answered" fill="url(#gradCallsAnswered)" radius={[8,8,0,0]} maxBarSize={40} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <div className="flex h-full items-center justify-center text-[--muted] text-sm">Pas de données.</div>}
+              </div>
+              <div className="text-[11px] text-[--muted] mt-2">Basé sur <b>CallAttempt.startedAt</b> et <b>CallOutcome=ANSWERED</b>.</div>
+            </div>
+
+            {/* RV0 no-show weekly */}
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+              <div className="flex items-center justify-between">
+                <div className="font-medium">RV0 no-show par semaine</div>
+                <div className="text-xs text-[--muted]">{rv0NsWeekly.reduce((s,x)=>s+(x.count||0),0).toLocaleString('fr-FR')}</div>
+              </div>
+              <div className="h-64 mt-2">
+                {rv0NsWeekly.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={rv0NsWeekly} margin={{ left: 8, right: 8, top: 10, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="gradRv0Ns" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#ef4444" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#b91c1c" stopOpacity={0.7} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+                      <XAxis dataKey="label" tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
+                      <Tooltip content={<ProTooltip title="RV0 no-show" valueFormatters={{ count: (v)=>fmtInt(v) }} />} />
+                      <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+                      <Bar
+                        name="RV0 no-show"
+                        dataKey="count"
+                        fill="url(#gradRv0Ns)"
+                        radius={[8,8,0,0]}
+                        maxBarSize={44}
+                        onClick={(d: any) => {
+                          if (!d?.activeLabel) return;
+                          const row = rv0NsWeekly.find(x => x.label === d.activeLabel);
+                          if (!row) return;
+                          openAppointmentsDrill({
+                            title: `RV0 no-show – semaine ${row.label}`,
+                            type: "RV0", status: "NO_SHOW",
+                            from: row.weekStart.slice(0,10), to: row.weekEnd.slice(0,10),
+                          });
+                        }}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-[--muted] text-sm">Aucun no-show RV0 sur la période.</div>
+                )}
+              </div>
+              <div className="text-[11px] text-[--muted] mt-2">
+                Compté sur la <b>date/heure du RDV</b> : chaque barre = lundi → dimanche.
+              </div>
+            </div>
+          </div>
+
+          {/* ===== Classements & Hall of Fame ===== */}
+          <div className="relative mt-6">
+            <div className="absolute inset-0 -z-10">
+              <div className="pointer-events-none absolute -top-24 left-1/3 h-72 w-[60vw] rounded-full blur-3xl opacity-25"
+                style={{ background: 'radial-gradient(60% 60% at 50% 50%, rgba(99,102,241,.35), rgba(14,165,233,.15), transparent 70%)' }} />
+              <div className="pointer-events-none absolute -bottom-16 -left-20 h-60 w-96 rounded-full blur-3xl opacity-20"
+                style={{ background: 'radial-gradient(50% 50% at 50% 50%, rgba(56,189,248,.35), rgba(59,130,246,.15), transparent 70%)' }} />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Top Closer */}
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
+                <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/[0.04] blur-2xl" />
+                <div className="flex items-center gap-3">
+                  <div className="h-11 w-11 rounded-2xl bg-emerald-400/10 border border-emerald-400/25 flex items-center justify-center">👑</div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-emerald-300/80">Hall of Fame</div>
+                    <div className="text-lg font-semibold">Top Closer</div>
+                  </div>
+                  <div className="ml-auto text-right text-xs text-[--muted]">Taux closing</div>
+                </div>
+                <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+                  {sortedClosers[0] ? (
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl leading-none">🥇</div>
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{sortedClosers[0].name}</div>
+                        <div className="text-xs text-[--muted] truncate">{sortedClosers[0].email}</div>
+                      </div>
+                      <div className="ml-auto text-right">
+                        <div className="text-lg font-semibold">{Math.round((sortedClosers[0].closingRate || 0) * 100)}%</div>
+                        <div className="text-[10px] text-[--muted]">{sortedClosers[0].salesClosed} ventes • {sortedClosers[0].rv1Honored} RV1 honorés</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-[--muted]">— Aucune donnée</div>
                   )}
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
 
-      <div className="px-4 py-2 text-[10px] text-[--muted] border-t border-white/10">
-        Bandeau scrollable — passe ta souris/ton doigt pour parcourir. Les données sont calculées sur les <b>WON</b> de la période.
-      </div>
-    </div>
-  )}
-</div>
-
-      {/* Vues additionnelles */}
-          {view === "exports" && (
-            <div className="space-y-4">
-              <div className="card"><div className="text-sm text-[--muted] mb-2">Exports PDF</div>
-                <p className="text-sm text-[--muted]">Télécharge les PDF “Setters” et “Closers” pour la plage de dates choisie ci-dessus.</p>
+              {/* Top Setter */}
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
+                <div className="absolute -right-10 -top-8 w-40 h-40 rounded-full bg-indigo-400/10 blur-2xl" />
+                <div className="flex items-center gap-3">
+                  <div className="h-11 w-11 rounded-2xl bg-indigo-400/10 border border-indigo-400/25 flex items-center justify-center">⚡</div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-indigo-300/80">Hall of Fame</div>
+                    <div className="text-lg font-semibold">Top Setter</div>
+                  </div>
+                  <div className="ml-auto text-right text-xs text-[--muted]">RV1 & qualification</div>
+                </div>
+                <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+                  {sortedSetters[0] ? (
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl leading-none">🥇</div>
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{sortedSetters[0].name}</div>
+                        <div className="text-[10px] text-[--muted] truncate">{sortedSetters[0].email}</div>
+                      </div>
+                      <div className="ml-auto text-right">
+                        <div className="text-lg font-semibold">{sortedSetters[0].rv1FromHisLeads} RV1</div>
+                        <div className="text-[10px] text-[--muted]">{Math.round((sortedSetters[0].qualificationRate || 0) * 100)}% qualif • {sortedSetters[0].leadsReceived} leads</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-[--muted]">— Aucune donnée</div>
+                  )}
+                </div>
               </div>
+
+              {/* Top Duo */}
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
+                <div className="absolute right-0 bottom-0 w-40 h-40 rounded-full bg-amber-400/10 blur-2xl" />
+                <div className="flex items-center gap-3">
+                  <div className="h-11 w-11 rounded-2xl bg-amber-400/10 border border-amber-400/25 flex items-center justify-center">💎</div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-amber-300/80">Hall of Fame</div>
+                    <div className="text-lg font-semibold">Équipe de choc</div>
+                  </div>
+                  <div className="ml-auto text-right text-xs text-[--muted]">CA & Ventes</div>
+                </div>
+                <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+                  {duos?.[0] ? (
+                    <div className="grid grid-cols-2 gap-3 items-center">
+                      <div className="min-w-0">
+                        <div className="text-xs text-[--muted]">Setter</div>
+                        <div className="font-medium truncate">{duos[0].setterName}</div>
+                        <div className="text-[10px] text-[--muted] truncate">{duos[0].setterEmail}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-[--muted]">Closer</div>
+                        <div className="font-medium truncate">{duos[0].closerName}</div>
+                        <div className="text-[10px] text-[--muted] truncate">{duos[0].closerEmail}</div>
+                      </div>
+                      <div className="col-span-2 flex items-center justify-between">
+                        <div className="text-lg font-semibold">{fmtEUR(duos[0].revenue)}</div>
+                        <div className="text-[10px] text-[--muted]">{duos[0].salesCount} ventes • RV1 {duos[0].rv1Honored}/{duos[0].rv1Planned}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-[--muted]">— Aucune donnée</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Spotlight tables */}
+            <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {/* Closers */}
+              <div className="rounded-3xl border border-white/10 bg-[rgba(18,24,38,.6)] backdrop-blur-xl overflow-hidden">
+                <div className="px-4 py-2 text-xs uppercase tracking-wider border-b border-white/10 bg-[linear-gradient(90deg,rgba(16,185,129,.15),transparent)]">
+                  👥 Spotlight Closers
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[760px]">
+                    <thead className="text-left text-[--muted] text-xs sticky top-0 bg-[rgba(18,24,38,.8)] backdrop-blur-md">
+                      <tr>
+                        <th className="py-2.5 px-3">Closer</th>
+                        <th className="py-2.5 px-3">Taux closing</th>
+                        <th className="py-2.5 px-3">Ventes</th>
+                        <th className="py-2.5 px-3">RV1 honorés</th>
+                        <th className="py-2.5 px-3">CA</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedClosers.slice(0, 8).map((c, i) => (
+                        <tr key={c.userId} className="border-t border-white/10 hover:bg-white/[0.04] transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-[--muted] w-5">{i < 3 ? ['🥇','🥈','🥉'][i] : `#${i+1}`}</span>
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{c.name}</div>
+                                <div className="text-[10px] text-[--muted] truncate">{c.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold">{Math.round((c.closingRate || 0) * 100)}%</td>
+                          <td className="py-2.5 px-3">{c.salesClosed}</td>
+                          <td className="py-2.5 px-3">{c.rv1Honored}</td>
+                          <td className="py-2.5 px-3">{(c.revenueTotal || 0).toLocaleString('fr-FR')} €</td>
+                        </tr>
+                      ))}
+                      {!sortedClosers.length && (
+                        <tr><td className="py-6 px-3 text-[--muted]" colSpan={5}>Aucune donnée.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Setters */}
+              <div className="rounded-3xl border border-white/10 bg-[rgba(18,24,38,.6)] backdrop-blur-xl overflow-hidden">
+                <div className="px-4 py-2 text-xs uppercase tracking-wider border-b border-white/10 bg-[linear-gradient(90deg,rgba(99,102,241,.18),transparent)]">
+                  ☎️ Spotlight Setters
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[820px]">
+                    <thead className="text-left text-[--muted] text-xs sticky top-0 bg-[rgba(18,24,38,.8)] backdrop-blur-md">
+                      <tr>
+                        <th className="py-2.5 px-3">Setter</th>
+                        <th className="py-2.5 px-3">RV1 (ses leads)</th>
+                        <th className="py-2.5 px-3">Taux qualification</th>
+                        <th className="py-2.5 px-3">Leads</th>
+                        <th className="py-2.5 px-3">RV0</th>
+                        <th className="py-2.5 px-3">TTFC</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedSetters.slice(0, 8).map((s, i) => (
+                        <tr key={s.userId} className="border-t border-white/10 hover:bg-white/[0.04] transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-[--muted] w-5">{i < 3 ? ['🥇','🥈','🥉'][i] : `#${i+1}`}</span>
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{s.name}</div>
+                                <div className="text-[10px] text-[--muted] truncate">{s.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">{s.rv1FromHisLeads ?? 0}</td>
+                          <td className="py-2.5 px-3">{Math.round((s.qualificationRate || 0) * 100)}%</td>
+                          <td className="py-2.5 px-3">{s.leadsReceived ?? 0}</td>
+                          <td className="py-2.5 px-3">{s.rv0Count ?? 0}</td>
+                          <td className="py-2.5 px-3">{s.ttfcAvgMinutes ?? '—'} min</td>
+                        </tr>
+                      ))}
+                      {!sortedSetters.length && (
+                        <tr><td className="py-6 px-3 text-[--muted]" colSpan={6}>Aucune donnée.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* DUO STRIP */}
+            {duos.length > 0 && (
+              <div className="mt-5 rounded-3xl border border-white/10 bg-[rgba(13,18,29,.7)] backdrop-blur-xl overflow-hidden">
+                <div className="px-4 py-2 text-xs uppercase tracking-wider border-b border-white/10 bg-[linear-gradient(90deg,rgba(251,191,36,.18),transparent)]">
+                  💠 Équipe de choc — meilleurs duos
+                </div>
+
+                <div className="relative">
+                  <div className="flex gap-3 p-3 overflow-x-auto snap-x">
+                    {duos.map((d, i) => {
+                      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                      const tone =
+                        i === 0 ? 'border-emerald-400/30 bg-emerald-400/10'
+                        : i === 1 ? 'border-indigo-400/30 bg-indigo-400/10'
+                        : i === 2 ? 'border-amber-400/30 bg-amber-400/10'
+                        : 'border-white/10 bg-white/[0.04]';
+                      return (
+                        <div
+                          key={d.setterId + '_' + d.closerId}
+                          className={`snap-start shrink-0 min-w-[300px] rounded-2xl border ${tone} px-3 py-2`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{medal || '💎'}</span>
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium truncate">{d.setterName} × {d.closerName}</div>
+                              <div className="text-[10px] text-[--muted] truncate">{d.setterEmail} • {d.closerEmail}</div>
+                            </div>
+                            <div className="ml-auto text-right text-sm font-semibold">{fmtEUR(d.revenue)}</div>
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 text-[11px] text-[--muted]">
+                            <span className="px-1.5 py-0.5 rounded border border-white/10 bg-black/20">{d.salesCount} ventes</span>
+                            <span className="px-1.5 py-0.5 rounded border border-white/10 bg-black/20">RV1 {d.rv1Honored}/{d.rv1Planned}</span>
+                            {d.rv1HonorRate != null && (
+                              <span className="px-1.5 py-0.5 rounded border border-white/10 bg-black/20">{d.rv1HonorRate}%</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="px-4 py-2 text-[10px] text-[--muted] border-t border-white/10">
+                  Bandeau scrollable — passe ta souris/ton doigt pour parcourir. Les données sont calculées sur les <b>WON</b> de la période.
+                </div>
+              </div>
+            )}
+
+            {/* Vues additionnelles */}
+            {view === "exports" && (
+              <div className="space-y-4">
+                <div className="card"><div className="text-sm text-[--muted] mb-2">Exports PDF</div>
+                  <p className="text-sm text-[--muted]">Télécharge les PDF “Setters” et “Closers” pour la plage de dates choisie ci-dessus.</p>
+                </div>
                 <PdfExports
                   from={typeof range.from === "string" ? range.from : range.from?.toISOString().slice(0, 10)}
                   to={typeof range.to === "string" ? range.to : range.to?.toISOString().slice(0, 10)}
-                />            
-            </div>
-          )}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1292,7 +1405,6 @@ export default function DashboardPage() {
               </div>
 
               <div className="space-y-4">
-                {/* Presets rapides */}
                 <div>
                   <div className="label">Période rapide</div>
                   <div className="flex flex-wrap gap-2">
@@ -1302,18 +1414,18 @@ export default function DashboardPage() {
                     <button type="button" className="tab" onClick={() => { const { from, to } = currentMonthRange(); setDraftRange({ from: asDate(from)!, to: asDate(to)! }); }}>Ce mois</button>
                   </div>
                 </div>
-                {/* Personnalisée */}
+
                 <div>
                   <div className="label">Période personnalisée</div>
-                     <DateRangePicker
-                      value={draftRange}
-                      onChange={(r) =>
-                        setDraftRange({
-                          from: asDate(r.from) ?? r.from, // jamais “undefined”
-                          to:   asDate(r.to)   ?? r.to,   // jamais “undefined”
-                        })
-                      }
-                    />
+                  <DateRangePicker
+                    value={draftRange}
+                    onChange={(r) =>
+                      setDraftRange({
+                        from: asDate(r.from) ?? r.from,
+                        to:   asDate(r.to)   ?? r.to,
+                      })
+                    }
+                  />
                 </div>
 
                 <div className="flex items-center justify-between">
