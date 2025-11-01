@@ -6,6 +6,7 @@ import api from "@/lib/api";
 type Props = {
   from?: string;
   to?: string;
+  
 };
 
 function buildParams(from?: string, to?: string) {
