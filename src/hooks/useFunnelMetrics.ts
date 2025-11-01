@@ -26,4 +26,6 @@ export function useFunnelMetrics(start: Date, end: Date) {
   }, [start, end]);
 
   return { data, loading, error };
+  
 }
+
