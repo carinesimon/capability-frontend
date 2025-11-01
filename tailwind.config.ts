@@ -8,4 +8,5 @@ export default {
   ],
   theme: { extend: {} },
   plugins: [],
+  
 } satisfies Config
