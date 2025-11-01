@@ -6,4 +6,5 @@ export default function StatCard({ title, value, hint }: { title: string; value:
       {hint && <div className="mt-1 text-xs text-[--muted]">{hint}</div>}
     </div>
   );
+  
 }
