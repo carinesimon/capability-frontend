@@ -389,4 +389,5 @@ export default function AutomatisationsPage() {
       `}</style>
     </div>
   );
+  
 }
