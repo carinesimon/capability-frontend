@@ -25,4 +25,5 @@ export default function useTheme() {
   }, [theme, apply]);
 
   return { theme, setTheme: apply, toggle };
+  
 }
