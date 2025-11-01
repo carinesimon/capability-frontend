@@ -42,4 +42,5 @@ export function normalizeQueryProspects(input: any): QueryProspectsDto {
     from: s(input?.from),
     to: s(input?.to),
   };
+  
 }
