@@ -9,4 +9,5 @@ export type MoveProspectDto = {
 // (Optionnel) petit garde-fou runtime si tu veux valider côté front
 export function isMoveProspectDto(v: unknown): v is MoveProspectDto {
   return !!v && typeof (v as any).toStage === "string" && (v as any).toStage.length > 0;
+  
 }
