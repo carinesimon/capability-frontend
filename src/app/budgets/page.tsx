@@ -77,6 +77,7 @@ type WeeklySnapshot = {
   revenue: number;
   cpl: number | null;
   roas: number | null;
+  
 };
 
 type BudgetRow = {
