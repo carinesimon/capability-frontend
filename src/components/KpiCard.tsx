@@ -48,4 +48,5 @@ export default function KpiCard({
       )}
     </motion.div>
   );
+  
 }
