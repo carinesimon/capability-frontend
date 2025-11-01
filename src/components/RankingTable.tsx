@@ -45,5 +45,6 @@ export default function RankingTable<T extends Record<string, any>>({
         </tbody>
       </table>
     </div>
+    
   );
 }
