@@ -45,4 +45,5 @@ export function normalizeUpdateProspect(input: any): UpdateProspectDto {
 
     stage: s(input?.stage),
   };
+  
 }
