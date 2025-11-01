@@ -20,4 +20,5 @@ export default function Clock() {
   }, []);
 
   return <span>{now || "—"}</span>;
+  
 }
