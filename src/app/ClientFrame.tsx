@@ -19,5 +19,6 @@ export default function ClientFrame({ children }: { children: React.ReactNode })
       {!isLogin && <Sidebar />}
       <div className={isLogin ? "min-h-screen" : "min-h-screen sm:ml-64"}>{children}</div>
     </>
+    
   );
 }
