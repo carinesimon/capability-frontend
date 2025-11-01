@@ -39,4 +39,5 @@ export function SimpleTable<T extends Record<string, any>>({
       </table>
     </div>
   );
+  
 }
