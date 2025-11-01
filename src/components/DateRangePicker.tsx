@@ -9,6 +9,7 @@ export type Range = { from: string | Date; to: string | Date };
 
 function fmt(d: dayjs.Dayjs) {
   return d.format("YYYY-MM-DD");
+  
 }
 
 /** Convertit string|Date en valeur compatible <input type="date"> (YYYY-MM-DD) */
