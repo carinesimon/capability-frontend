@@ -5,4 +5,5 @@ const nextConfig = {
   // Si un jour tu veux ignorer aussi les erreurs de types en CI :
   // typescript: { ignoreBuildErrors: true },
 };
+
 module.exports = nextConfig;
