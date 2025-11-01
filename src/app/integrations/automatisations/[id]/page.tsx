@@ -55,6 +55,7 @@ const STAGE_DEFAULTS: string[] = [
   "WON",
   "LOST",
   "NOT_QUALIFIED",
+  
 ];
 
 
