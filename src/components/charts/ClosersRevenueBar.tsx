@@ -78,4 +78,5 @@ export default function ClosersRevenueBar({ data }: { data: Row[] }) {
       </div>
     </div>
   );
+  
 }
