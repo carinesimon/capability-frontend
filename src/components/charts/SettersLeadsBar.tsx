@@ -74,4 +74,5 @@ export default function SettersLeadsBar({ data }: { data: Row[] }) {
       </div>
     </div>
   );
+  
 }
