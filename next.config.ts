@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   },
   // Si tu as aussi des erreurs TypeScript bloquantes, décommente la ligne ci-dessous.
   // typescript: { ignoreBuildErrors: true },
+  
 };
 
 export default nextConfig;
