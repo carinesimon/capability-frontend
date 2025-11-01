@@ -96,6 +96,7 @@ function getByPath(obj: any, path?: string) {
     cur = cur[k as any];
   }
   return cur;
+  
 }
 
 function pretty(val: any) {
