@@ -12,6 +12,7 @@ type Budget = {
   monthStart: string | null; // ISO
   createdAt: string;
   updatedAt: string;
+  
 };
 
 type SummaryOut = {
