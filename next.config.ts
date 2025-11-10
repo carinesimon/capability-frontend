@@ -1,13 +1,25 @@
-import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {
-  eslint: {
-    // Autorise le build même si ESLint trouve des erreurs.
-    ignoreDuringBuilds: true,
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  async rewrites() {
+    return [
+      {
+        source: "/prospects/:path*",
+        destination: "http://localhost:3001/prospects/:path*",
+      },
+      {
+        source: "/leads/:path*",
+        destination: "http://localhost:3001/leads/:path*",
+      },
+      {
+        source: "/reporting/:path*",
+        destination: "http://localhost:3001/reporting/:path*",
+      },
+      {
+        source: "/auth/:path*",
+        destination: "http://localhost:3001/auth/:path*",
+      },
+    ];
   },
-  // Si tu as aussi des erreurs TypeScript bloquantes, décommente la ligne ci-dessous.
-  // typescript: { ignoreBuildErrors: true },
-  
 };
 
 export default nextConfig;
