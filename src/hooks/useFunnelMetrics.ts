@@ -8,18 +8,29 @@ export type FunnelTotals = {
   CALL_ATTEMPT: number;
   CALL_ANSWERED: number;
   SETTER_NO_SHOW: number;
+
   RV0_PLANNED: number;
   RV0_HONORED: number;
   RV0_NO_SHOW: number;
+  RV0_CANCELED: number;   // ✅ nouveau
+
   RV1_PLANNED: number;
   RV1_HONORED: number;
   RV1_NO_SHOW: number;
+  RV1_POSTPONED?: number;
+  RV1_CANCELED: number;   // ✅ nouveau
+
   RV2_PLANNED: number;
   RV2_HONORED: number;
+  RV2_POSTPONED?: number;
+  RV2_CANCELED: number;   // ✅ nouveau
+
+  NOT_QUALIFIED?: number;
+  LOST?: number;
   WON: number;
-  // si ton enum LeadStage a d’autres valeurs, elles
-  // arriveront aussi dans l’objet, et seront gérées
-  // par normalizeTotals côté page.tsx
+
+  // agrégat global des RDV annulés (si ton backend le renvoie)
+  APPOINTMENT_CANCELED?: number;
 };
 
 function toISODate(d: Date | string) {
@@ -30,7 +41,13 @@ function toISODate(d: Date | string) {
   return `${y}-${m}-${day}`;
 }
 
-export function useFunnelMetrics(fromDate?: Date | null, toDate?: Date | null) {
+export type Timezone = string; // ex: 'Europe/Paris', 'Africa/Abidjan', ...
+
+export function useFunnelMetrics(
+  fromDate?: Date | null,
+  toDate?: Date | null,
+  tz?: Timezone
+) {
   const [data, setData] = useState<FunnelTotals | {}>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -47,9 +64,8 @@ export function useFunnelMetrics(fromDate?: Date | null, toDate?: Date | null) {
         setLoading(true);
         setError(null);
 
-        // ✅ On utilise enfin le backend de métriques basé sur StageEvent
         const res = await api.get<FunnelTotals>("/metrics/funnel", {
-          params: { from, to },
+          params: { from, to, tz }, // ✅ on envoie le tz au backend
         });
 
         if (cancelled) return;
@@ -64,8 +80,8 @@ export function useFunnelMetrics(fromDate?: Date | null, toDate?: Date | null) {
     }
 
     load();
-    // on dépend des timestamps pour éviter les boucles
-  }, [fromDate?.getTime(), toDate?.getTime()]);
+  }, [fromDate?.getTime(), toDate?.getTime(), tz]); // ✅ tz dans les deps
 
   return { data, loading, error };
 }
+
