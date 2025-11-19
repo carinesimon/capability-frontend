@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
@@ -3669,5 +3668,6 @@ async function fetchStageSeriesAny(stage: string, params: any) {
     </div>
   );
 }
+
 
 
