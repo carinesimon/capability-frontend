@@ -13,9 +13,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { getAccessToken } from "@/lib/auth";
 import Clock from "@/components/Clock";
 import PdfExports from "@/components/PdfExports";
+import { reportingApi } from "@/lib/reporting";
 import {
   BarChart,
   Bar,
+  AreaChart,
+  Area,
   CartesianGrid,
   XAxis,
   YAxis,
@@ -24,6 +27,16 @@ import {
   Legend,
 } from "recharts";
 import { useFunnelMetrics } from "@/hooks/useFunnelMetrics";
+
+const TIMEZONES = [
+  "Europe/Paris",
+  "Europe/Amsterdam",
+  "Africa/Abidjan",
+  "Africa/Dakar",
+  "Africa/Casablanca",
+  "America/Toronto",
+  "America/New_York",
+];
 
 const MAX_RANGE_START = new Date(2023, 0, 1);
 
@@ -65,38 +78,68 @@ const KpiRatio = ({
   );
 };
 
-/* ---------- Types alignés backend ---------- */
+/* ---------- Types alignés backend (spotlight) ---------- */
 type SetterRow = {
   userId: string;
   name: string;
   email: string;
+
+  // Leads & RV
   leadsReceived: number;
-  rv0Count: number;
-  rv1FromHisLeads: number;
-  ttfcAvgMinutes: number | null;
-  revenueFromHisLeads: number;
+  rv1PlannedOnHisLeads?: number;   // ✅ nouveau
+  rv1HonoredOnHisLeads?: number;   // ✅ nouveau
+  rv1CanceledOnHisLeads?: number;  // ✅ nouveau
+  rv1DoneOnHisLeads?:number;
+  settingRate?:number;
+  // Déjà présents dans ton code (on les garde)
+  rv0Count?: number;
+  ttfcAvgMinutes?: number | null;
+
+  // Business depuis ses leads
+  salesFromHisLeads?: number;      // ✅ nouveau
+  revenueFromHisLeads?: number;    // ✅ nouveau
+
+  // Métriques média (si dispo)
   spendShare?: number | null;
-  cpl: number | null;
-  cpRv0: number | null;
-  cpRv1: number | null;
-  roas: number | null;
-  salesFromHisLeads: number;
+  cpl?: number | null;
+  cpRv0?: number | null;
+  cpRv1?: number | null;
+  roas?: number | null;
+
+  // Dérivés côté front
+  qualificationRate?: number | null; // rv1HonoredOnHisLeads / leadsReceived
+  rv1CancelRateOnHisLeads?: number | null; // rv1CanceledOnHisLeads / rv1PlannedOnHisLeads
 };
 
 type CloserRow = {
   userId: string;
   name: string;
   email: string;
+
+  // RV1
   rv1Planned: number;
   rv1Honored: number;
-  rv1NoShow: number;
+  rv1Canceled?: number;           // ✅ nouveau
+  rv1CancelRate?: number | null;  // ✅ nouveau
+
+  // RV2
   rv2Planned: number;
-  rv2Honored: number;
+  rv2Honored?: number;
+  rv2Canceled?: number;           // ✅ nouveau
+  rv2CancelRate?: number | null;  // ✅ nouveau
+
+  // Business
   salesClosed: number;
   revenueTotal: number;
-  roasPlanned: number | null;
-  roasHonored: number | null;
+
+  // Optionnels existants
+  roasPlanned?: number | null;
+  roasHonored?: number | null;
+
+  // Dérivé côté front
+  closingRate?: number | null;    // salesClosed / rv1Honored
 };
+
 
 type DuoRow = {
   setterId: string;
@@ -188,6 +231,8 @@ function toISODate(d: Date | string) {
 }
 const fmtInt = (n: number) => Math.round(n).toLocaleString("fr-FR");
 const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
+const fmtPct = (num?: number | null, den?: number | null) =>
+  den && den > 0 ? `${Math.round(((num || 0) / den) * 100)}%` : "—";
 
 /* ---------- Tooltip (Recharts) ---------- */
 function ProTooltip({
@@ -368,14 +413,21 @@ type FunnelKey =
   | "callsTotal"
   | "callsAnswered"
   | "setterNoShow"
+
   | "rv0Planned"
   | "rv0Honored"
   | "rv0NoShow"
+  | "rv0Canceled"
+
   | "rv1Planned"
   | "rv1Honored"
   | "rv1NoShow"
+  | "rv1Canceled"
+
   | "rv2Planned"
   | "rv2Honored"
+  | "rv2Canceled"
+
   | "wonCount";
 
 type FunnelProps = {
@@ -385,14 +437,21 @@ type FunnelProps = {
     callsTotal: number;
     callsAnswered: number;
     setterNoShow: number;
+
     rv0P: number;
     rv0H: number;
     rv0NS: number;
+    rv0C: number;
+
     rv1P: number;
     rv1H: number;
     rv1NS: number;
+    rv1C: number;
+
     rv2P: number;
     rv2H: number;
+    rv2C: number;
+
     won: number;
   };
   onCardClick: (key: FunnelKey) => void;
@@ -448,12 +507,21 @@ function Funnel({ data, onCardClick }: FunnelProps) {
       value: data.rv0NS,
       hint: "Absences au premier RDV.",
     },
+
+    {
+      key: "rv0Canceled",
+      label: "RV0 annulés",
+      value: data.rv0C,
+      hint: "Annulations du premier RDV.",
+    },
+
     {
       key: "rv1Planned",
       label: "RV1 planifiés",
       value: data.rv1P,
       hint: "Closings programmés.",
     },
+
     {
       key: "rv1Honored",
       label: "RV1 honorés",
@@ -466,6 +534,14 @@ function Funnel({ data, onCardClick }: FunnelProps) {
       value: data.rv1NS,
       hint: "Absences au closing.",
     },
+
+    {
+      key: "rv1Canceled",
+      label: "RV1 annulés",
+      value: data.rv1C,
+      hint: "Annulations du closing.",
+    },
+
     {
       key: "rv2Planned",
       label: "RV2 planifiés",
@@ -478,12 +554,22 @@ function Funnel({ data, onCardClick }: FunnelProps) {
       value: data.rv2H,
       hint: "Deuxièmes RDV tenus.",
     },
+
+    {
+      key: "rv2Canceled",
+      label: "RV2 annulés",
+      value: data.rv2C,
+      hint: "Annulations du second RDV.",
+    },
+
     {
       key: "wonCount",
       label: "Ventes (WON)",
       value: data.won,
       hint: "Passages en client.",
     },
+
+
   ] as const;
 
   const rate = (a: number, b: number) =>
@@ -611,12 +697,24 @@ function normalizeTotals(
     RV2_PLANNED: pick("RV2_PLANNED", "RV2_PLANIFIE", "RV2_PLANIFIÉ"),
     RV2_HONORED: pick("RV2_HONORED", "RV2_HONORE", "RV2_HONORÉ"),
 
+    // --- RDV annulés par type (nouvelles clés) ---
+    RV0_CANCELED: pick("RV0_CANCELED", "RV0_ANNULÉ", "RV0_ANNULE"),
+    RV1_CANCELED: pick("RV1_CANCELED", "RV1_ANNULÉ", "RV1_ANNULE"),
+    RV2_CANCELED: pick("RV2_CANCELED", "RV2_ANNULÉ", "RV2_ANNULE"),
+
     WON: pick("WON"),
     LOST: pick("LOST"),
     NOT_QUALIFIED: pick(
       "NOT_QUALIFIED",
       "NON_QUALIFIE",
       "NON_QUALIFIÉ"
+    ),
+    APPOINTMENT_CANCELED: pick(
+      "APPOINTMENT_CANCELED",
+      "APPOINTMENT_CANCELLED",
+      "RDV_ANNULE",
+      "RDV_ANNULÉ",
+      "appointmentCanceled"
     ),
   };
 }
@@ -646,6 +744,9 @@ export default function DashboardPage() {
     to: defaultTo,
   });
 
+    // Timezone sélectionné (affichage + agrégations serveur)
+  const [tz, setTz] = useState<string>("Europe/Paris");
+
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [funnelOpen, setFunnelOpen] = useState(false);
   const [comparePrev, setComparePrev] =
@@ -667,7 +768,7 @@ export default function DashboardPage() {
     data: totals = {},
     loading: funnelLoading,
     error: funnelError,
-  } = useFunnelMetrics(fromDate, toDate);
+  } = useFunnelMetrics(fromDate, toDate, tz);
 
   // Période précédente (même durée)
   const { prevFromISO, prevToISO } = useMemo(() => {
@@ -782,10 +883,10 @@ export default function DashboardPage() {
 
         // 1) Résumés & séries hebdo
         const [sumRes, leadsRes, weeklyRes, opsRes] = await Promise.all([
-          api.get<SummaryOut>("/reporting/summary", { params: { from: fromISO, to: toISO } }),
-          api.get<LeadsReceivedOut>("/metrics/leads-by-day", { params: { from: fromISO, to: toISO } }),
-          api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", { params: { from: fromISO, to: toISO } }),
-          api.get<{ ok: true; rows: WeeklyOpsRow[] }>("/reporting/weekly-ops", { params: { from: fromISO, to: toISO } }),
+          api.get<SummaryOut>("/reporting/summary", { params: { from: fromISO, to: toISO, tz, } }),
+          api.get<LeadsReceivedOut>("/metrics/leads-by-day", { params: { from: fromISO, to: toISO, tz, } }),
+          api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", { params: { from: fromISO, to: toISO, tz, } }),
+          api.get<{ ok: true; rows: WeeklyOpsRow[] }>("/reporting/weekly-ops", { params: { from: fromISO, to: toISO, tz, } }),
         ]);
 
         if (cancelled) return;
@@ -800,19 +901,17 @@ export default function DashboardPage() {
         // 2) Séries journalières basées sur StageEvent (mêmes métriques que le funnel /metrics/funnel)
         const [m1, m2, m3] = await Promise.all([
           fetchSafeMetric("/metrics/stage-series", {
+              from: fromISO, to: toISO, stage: "CALL_REQUESTED", tz,
+            }),
+          fetchSafeMetric("/metrics/stage-series", {
             from: fromISO,
             to: toISO,
-            stage: "CALL_REQUESTED",   // Demandes d'appel
+            stage: "CALL_ATTEMPT", tz,     // Appels passés
           }),
           fetchSafeMetric("/metrics/stage-series", {
             from: fromISO,
             to: toISO,
-            stage: "CALL_ATTEMPT",     // Appels passés
-          }),
-          fetchSafeMetric("/metrics/stage-series", {
-            from: fromISO,
-            to: toISO,
-            stage: "CALL_ANSWERED",    // Appels répondus
+            stage: "CALL_ANSWERED", tz,    // Appels répondus
           }),
         ]);
 
@@ -829,19 +928,20 @@ export default function DashboardPage() {
         const series = rv0SeriesRes.data?.byDay || [];
 
         // Helpers semaine (UTC, lundi → dimanche)
-        function monday(d: Date) {
-          const dd = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0));
-          const dow = (dd.getUTCDay() + 6) % 7; // 0 = lundi
-          dd.setUTCDate(dd.getUTCDate() - dow);
+        function mondayLocal(d: Date) {
+          const dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          const dow = (dd.getDay() + 6) % 7; // Lundi = 0
+          dd.setDate(dd.getDate() - dow);
           return dd;
         }
-        function sunday(d: Date) {
-          const m = monday(d);
+        function sundayLocal(d: Date) {
+          const m = mondayLocal(d);
           const s = new Date(m);
-          s.setUTCDate(s.getUTCDate() + 6);
-          s.setUTCHours(23, 59, 59, 999);
+          s.setDate(s.getDate() + 6);
+          s.setHours(23, 59, 59, 999);
           return s;
         }
+
 
         // Regroupe par semaine (clé = lundi de la semaine)
         const map = new Map<string, { start: Date; end: Date; count: number }>();
@@ -850,8 +950,8 @@ export default function DashboardPage() {
           const when = new Date(entry.day);
           if (isNaN(when.getTime())) continue;
 
-          const ws = monday(when);
-          const we = sunday(when);
+          const ws = mondayLocal(when);
+          const we = sundayLocal(when);
           const key = ws.toISOString();
 
           const row = map.get(key) ?? { start: ws, end: we, count: 0 };
@@ -862,11 +962,11 @@ export default function DashboardPage() {
         // Construit les semaines continues pour la période demandée
         const weeks: Rv0NsWeek[] = [];
         if (fromISO && toISO) {
-          const start = monday(new Date(fromISO));
-          const end = sunday(new Date(toISO));
+          const start = mondayLocal(new Date(fromISO));
+          const end = sundayLocal(new Date(toISO));
           for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 7)) {
             const ws = new Date(d);
-            const we = sunday(ws);
+            const we = sundayLocal(ws);
             const key = ws.toISOString();
             const bucket = map.get(key);
 
@@ -897,39 +997,236 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [authChecked, authError, fromISO, toISO]);
+  }, [authChecked, authError, fromISO, toISO, tz]);
 
+  
   // Classements (setters / closers)
-  useEffect(() => {
-    if (!authChecked || authError) return;
-    let cancelled = false;
-    async function load() {
-      const q = { from: fromISO, to: toISO };
-      try {
-        const [sRes, cRes] = await Promise.all([
-          api.get<SetterRow[]>("/reporting/setters", {
-            params: q,
-          }),
-          api.get<CloserRow[]>("/reporting/closers", {
-            params: q,
-          }),
-        ]);
-        if (cancelled) return;
-        setSetters(sRes.data || []);
-        setClosers(cRes.data || []);
-      } catch (e: any) {
-        if (cancelled) return;
-        setErr(
-          e?.response?.data?.message ||
-            "Erreur de chargement (classements)"
-        );
+  // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
+useEffect(() => {
+  if (!authChecked || authError) return;
+  let cancelled = false;
+
+  async function loadSpotlight() {
+    const params = { from: fromISO, to: toISO, tz };
+
+    try {
+      // 1) Tentative endpoints spotlight
+      const [sRes, cRes] = await Promise.all([
+        api.get<SetterRow[]>("/reporting/spotlight-setters", { params }),
+        api.get<CloserRow[]>("/reporting/spotlight-closers", { params }),
+      ]);
+
+      if (cancelled) return;
+
+      const settersRaw = sRes.data || [];
+      const closersRaw = cRes.data || [];
+
+      // Dérivés
+      const settersDer = settersRaw.map(s => ({
+        ...s,
+        qualificationRate:
+          (s.rv1HonoredOnHisLeads || 0) / Math.max(1, s.leadsReceived || 0),
+        rv1CancelRateOnHisLeads:
+          (s.rv1CanceledOnHisLeads || 0) / Math.max(1, s.rv1PlannedOnHisLeads || 0),
+      }));
+      const closersDer = closersRaw.map(c => ({
+        ...c,
+        closingRate:
+          (c.salesClosed || 0) / Math.max(1, c.rv1Honored || 0),
+        rv1CancelRate:
+          (c.rv1Canceled || 0) / Math.max(1, c.rv1Planned || 0),
+        rv2CancelRate:
+          (c.rv2Canceled || 0) / Math.max(1, c.rv2Planned || 0),
+      }));
+
+      setSetters(settersDer as any);
+      setClosers(closersDer as any);
+      return;
+    } catch (e: any) {
+      // 404 -> fallback vers anciens endpoints
+      if (e?.response?.status !== 404) {
+        if (!cancelled) setErr(e?.response?.data?.message || "Erreur de chargement (spotlight)");
+        return;
       }
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [authChecked, authError, fromISO, toISO]);
+
+    // 2) Fallback anciens endpoints
+    try {
+      const [sRes2, cRes2] = await Promise.all([
+        api.get<any[]>("/reporting/setters", { params }),
+        api.get<any[]>("/reporting/closers", { params }),
+      ]);
+      if (cancelled) return;
+
+      const settersFallback: SetterRow[] = (sRes2.data || []).map(s => {
+        const leadsReceived = Number(s.leadsReceived || 0);
+        // On mappe au mieux depuis ton schéma existant
+        const rv1HonoredOnHisLeads = Number(s.rv1FromHisLeads || 0);
+        const rv1PlannedOnHisLeads = Number(s.rv1PlannedOnHisLeads || s.rv1FromHisLeads || 0);
+        const rv1CanceledOnHisLeads = Number(s.rv1CanceledOnHisLeads || 0);
+
+        return {
+          userId: s.userId,
+          name: s.name,
+          email: s.email,
+          leadsReceived,
+          rv0Count: s.rv0Count ?? 0,
+          ttfcAvgMinutes: s.ttfcAvgMinutes ?? null,
+
+          rv1PlannedOnHisLeads,
+          rv1HonoredOnHisLeads,
+          rv1CanceledOnHisLeads,
+
+          salesFromHisLeads: Number(s.salesFromHisLeads || 0),
+          revenueFromHisLeads: Number(s.revenueFromHisLeads || 0),
+
+          qualificationRate: leadsReceived ? rv1HonoredOnHisLeads / leadsReceived : 0,
+          rv1CancelRateOnHisLeads: rv1PlannedOnHisLeads
+            ? rv1CanceledOnHisLeads / rv1PlannedOnHisLeads
+            : null,
+
+          spendShare: s.spendShare ?? null,
+          cpl: s.cpl ?? null,
+          cpRv0: s.cpRv0 ?? null,
+          cpRv1: s.cpRv1 ?? null,
+          roas: s.roas ?? null,
+        };
+      });
+
+      const closersFallback: CloserRow[] = (cRes2.data || []).map(c => {
+        const rv1Planned = Number(c.rv1Planned || 0);
+        const rv1Honored = Number(c.rv1Honored || 0);
+        const rv1Canceled = Number(c.rv1Canceled || 0);
+
+        const rv2Planned = Number(c.rv2Planned || 0);
+        const rv2Honored = Number(c.rv2Honored || 0);
+        const rv2Canceled = Number(c.rv2Canceled || 0);
+
+        const salesClosed = Number(c.salesClosed || 0);
+        const revenueTotal = Number(c.revenueTotal || 0);
+
+        return {
+          userId: c.userId,
+          name: c.name,
+          email: c.email,
+          rv1Planned,
+          rv1Honored,
+          rv1Canceled,
+          rv1CancelRate: rv1Planned ? rv1Canceled / rv1Planned : null,
+          rv2Planned,
+          rv2Honored,
+          rv2Canceled,
+          rv2CancelRate: rv2Planned ? rv2Canceled / rv2Planned : null,
+          salesClosed,
+          revenueTotal,
+          roasPlanned: c.roasPlanned ?? null,
+          roasHonored: c.roasHonored ?? null,
+          closingRate: rv1Honored ? salesClosed / rv1Honored : 0,
+        };
+      });
+
+      setSetters(settersFallback);
+      setClosers(closersFallback);
+    } catch (e: any) {
+      if (!cancelled) {
+        setErr(e?.response?.data?.message || "Erreur de chargement (classements)");
+      }
+    }
+  }
+
+  loadSpotlight();
+  return () => { cancelled = true; };
+}, [authChecked, authError, fromISO, toISO, tz]);
+
+ // (NOUVEAU) Annulés par jour via historisation (StageEvent)
+type CanceledDailyRow = {
+  day: string;            // YYYY-MM-DD
+  RV0_CANCELED: number;
+  RV1_CANCELED: number;
+  RV2_CANCELED: number;
+  total: number;
+};
+type CanceledDailyOut = { total: number; byDay: CanceledDailyRow[] };
+
+useEffect(() => {
+  let cancelled = false;
+  (async () => {
+    try {
+      // 1) On récupère les 3 séries historiques (par jour) côté StageEvent
+      const [rv0, rv1, rv2] = await Promise.all([
+        fetchSafeMetric("/metrics/stage-series", { from: fromISO, to: toISO, stage: "RV0_CANCELED", tz }),
+        fetchSafeMetric("/metrics/stage-series", { from: fromISO, to: toISO, stage: "RV1_CANCELED", tz }),
+        fetchSafeMetric("/metrics/stage-series", { from: fromISO, to: toISO, stage: "RV2_CANCELED", tz }),
+      ]);
+
+      const by0 = rv0?.data?.byDay ?? [];
+      const by1 = rv1?.data?.byDay ?? [];
+      const by2 = rv2?.data?.byDay ?? [];
+
+      // 2) Fusion par jour (clé = YYYY-MM-DD)
+      const map = new Map<string, { r0: number; r1: number; r2: number }>();
+
+      const add = (arr: Array<{ day: string; count: number }>, key: "r0" | "r1" | "r2") => {
+        for (const x of arr) {
+          const d = x?.day;
+          if (!d) continue;
+          const isoDay = d.length >= 10
+            ? d.slice(0, 10)
+            : (() => {
+                const tmp = new Date(d);
+                const y = tmp.getFullYear();
+                const m = String(tmp.getMonth() + 1).padStart(2, "0");
+                const dd = String(tmp.getDate()).padStart(2, "0");
+                return `${y}-${m}-${dd}`;
+              })();
+          const row = map.get(isoDay) ?? { r0: 0, r1: 0, r2: 0 };
+          row[key] += Number(x.count || 0);
+          map.set(isoDay, row);
+        }
+      };
+
+      add(by0, "r0");
+      add(by1, "r1");
+      add(by2, "r2");
+
+      // 3) Range “continu” jour par jour (pour éviter les trous)
+      const out: CanceledDailyRow[] = [];
+      if (fromISO && toISO) {
+        const start = new Date(fromISO);
+        const end = new Date(toISO);
+        // normalise à minuit
+        start.setHours(0, 0, 0, 0);
+        end.setHours(0, 0, 0, 0);
+
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          // ⚠️ Pas de toISOString() ici : on fabrique le AAAA-MM-JJ en local
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const dd = String(d.getDate()).padStart(2, "0");
+          const key = `${y}-${m}-${dd}`;
+          const bucket = map.get(key) ?? { r0: 0, r1: 0, r2: 0 };
+          out.push({
+            day: key,
+            RV0_CANCELED: bucket.r0,
+            RV1_CANCELED: bucket.r1,
+            RV2_CANCELED: bucket.r2,
+            total: bucket.r0 + bucket.r1 + bucket.r2,
+          });
+        }
+      }
+
+      // 4) Total global
+      const total = out.reduce((s, x) => s + (x.total || 0), 0);
+
+      if (!cancelled) setCanceledDaily({ total, byDay: out });
+    } catch (e) {
+      if (!cancelled) setCanceledDaily({ total: 0, byDay: [] });
+    }
+  })();
+
+  return () => { cancelled = true; };
+}, [fromISO, toISO, tz]);
+
 
   // 💎 Duos (équipe de choc) — chargement manquant avant
     // Duos (Setter × Closer)
@@ -941,7 +1238,7 @@ export default function DashboardPage() {
       try {
         const res = await api.get<{ ok?: boolean; rows?: DuoRow[] }>(
           "/reporting/duos",
-          { params: { from: fromISO, to: toISO } }
+          { params: { from: fromISO, to: toISO, tz, } }
         );
         if (cancelled) return;
 
@@ -967,13 +1264,13 @@ export default function DashboardPage() {
 
     loadDuos();
     return () => { cancelled = true; };
-  }, [authChecked, authError, fromISO, toISO]);
+  }, [authChecked, authError, fromISO, toISO, tz]);
 
   // Enrichissements (taux) — pas de hooks conditionnels
   const settersWithRates = useMemo(() => {
     return setters.map((s) => {
       const qualDen = s.leadsReceived || 0;
-      const qualNum = s.rv1FromHisLeads || 0;
+      const qualNum = s.rv1PlannedOnHisLeads || 0;
       const qualificationRate = qualDen
         ? qualNum / qualDen
         : 0; // 0..1
@@ -997,12 +1294,12 @@ export default function DashboardPage() {
     const arr = [...settersWithRates];
     return arr.sort((a, b) => {
       if (
-        (b.rv1FromHisLeads || 0) !==
-        (a.rv1FromHisLeads || 0)
+        (b.rv1PlannedOnHisLeads || 0) !==
+        (a.rv1PlannedOnHisLeads || 0)
       )
         return (
-          (b.rv1FromHisLeads || 0) -
-          (a.rv1FromHisLeads || 0)
+          (b.rv1PlannedOnHisLeads || 0) -
+          (a.rv1PlannedOnHisLeads || 0)
         );
       if ((b.qualificationRate || 0) !== (a.qualificationRate || 0))
         return (
@@ -1054,7 +1351,7 @@ export default function DashboardPage() {
   // Global rates (affichage)
   const globalSetterQual = useMemo(() => {
     const num = settersWithRates.reduce(
-      (s, r) => s + (r.rv1FromHisLeads || 0),
+      (s, r) => s + (r.rv1PlannedOnHisLeads || 0),
       0
     );
     const den = settersWithRates.reduce(
@@ -1103,7 +1400,7 @@ export default function DashboardPage() {
           api.get<SummaryOut>("/reporting/summary", {
             params: {
               from: toISODate(prevFrom),
-              to: toISODate(prevTo),
+              to: toISODate(prevTo), tz,
             },
           }),
           api.get<LeadsReceivedOut>(
@@ -1111,7 +1408,7 @@ export default function DashboardPage() {
             {
               params: {
                 from: toISODate(prevFrom),
-                to: toISODate(prevTo),
+                to: toISODate(prevTo), tz,
               },
             }
           ),
@@ -1128,6 +1425,10 @@ export default function DashboardPage() {
   const kpiLeadsPrev = leadsPrev?.total ?? 0;
   const kpiRv1HonoredPrev =
     summaryPrev?.totals?.rv1Honored ?? 0;
+
+    const [canceledDaily, setCanceledDaily] = useState<{ total: number; byDay: Array<{
+      day: string; RV0_CANCELED: number; RV1_CANCELED: number; RV2_CANCELED: number; total: number;
+    }>}>({ total: 0, byDay: [] });
 
   // ======= DRILLS : helpers endpoints =======
   async function openAppointmentsDrill(params: {
@@ -1150,7 +1451,7 @@ export default function DashboardPage() {
           status: params.status,
           from: params.from ?? fromISO,
           to: params.to ?? toISO,
-          limit: 2000,
+          limit: 2000, tz,
         },
       }
     );
@@ -1158,6 +1459,7 @@ export default function DashboardPage() {
     setDrillRows(res.data?.items || []);
     setDrillOpen(true);
   }
+
   async function fetchSafe(
     url: string,
     params: Record<string, any>
@@ -1178,7 +1480,7 @@ export default function DashboardPage() {
   async function openCallRequestsDrill() {
     const res: any = await fetchSafe(
       "/reporting/drill/call-requests",
-      { from: fromISO, to: toISO, limit: 2000 }
+      { from: fromISO, to: toISO, limit: 2000, tz, }
     );
     setDrillTitle("Demandes d’appel – détail");
     const items: DrillItem[] = res?.data?.items || [];
@@ -1193,7 +1495,7 @@ export default function DashboardPage() {
   async function openCallsDrill() {
     const res: any = await fetchSafe(
       "/reporting/drill/calls",
-      { from: fromISO, to: toISO, limit: 2000 }
+      { from: fromISO, to: toISO, limit: 2000, tz, }
     );
     setDrillTitle("Appels passés – détail");
     const items: DrillItem[] = res?.data?.items || [];
@@ -1212,7 +1514,7 @@ export default function DashboardPage() {
         from: fromISO,
         to: toISO,
         answered: 1,
-        limit: 2000,
+        limit: 2000, tz,
       }
     );
     setDrillTitle("Appels répondus – détail");
@@ -1232,7 +1534,7 @@ export default function DashboardPage() {
         from: fromISO,
         to: toISO,
         setterNoShow: 1,
-        limit: 2000,
+        limit: 2000, tz,
       }
     );
     setDrillTitle("No-show Setter – détail");
@@ -1246,6 +1548,34 @@ export default function DashboardPage() {
     setDrillOpen(true);
   }
 
+  const STAGE_SYNONYMS: Record<string, string[]> = {
+  RV0_CANCELED:  ["RV0_CANCELED",  "RV0_CANCELLED"],
+  RV1_CANCELED:  ["RV1_CANCELED",  "RV1_CANCELLED"],
+  RV2_CANCELED:  ["RV2_CANCELED",  "RV2_CANCELLED"],
+  RV0_NO_SHOW:   ["RV0_NO_SHOW"],   // exemple
+};
+
+async function fetchStageSeriesAny(stage: string, params: any) {
+  const list = STAGE_SYNONYMS[stage] ?? [stage];
+  const results = await Promise.all(
+    list.map(s => api.get<MetricSeriesOut>("/metrics/stage-series", {
+      params: { ...params, stage: s },
+    }).catch(() => ({ data: null } as any)))
+  );
+  // fusionne les byDay (clé = YYYY-MM-DD)
+  const map = new Map<string, number>();
+  for (const r of results) {
+    const arr = r?.data?.byDay ?? [];
+    for (const it of arr) {
+      const k = (it?.day?.slice?.(0,10)) || new Date(it.day).toISOString().slice(0,10);
+      map.set(k, (map.get(k) ?? 0) + Number(it.count || 0));
+    }
+  }
+  const byDay = [...map.entries()].sort(([a],[b]) => a.localeCompare(b))
+    .map(([day, count]) => ({ day, count }));
+  const total = byDay.reduce((s,x)=>s+x.count,0);
+  return { total, byDay } as MetricSeriesOut;
+}
   const onFunnelCardClick = async (
     key:
       | "leads"
@@ -1256,11 +1586,14 @@ export default function DashboardPage() {
       | "rv0Planned"
       | "rv0Honored"
       | "rv0NoShow"
+      | "rv0Canceled"
       | "rv1Planned"
       | "rv1Honored"
       | "rv1NoShow"
+      | "rv1Canceled"
       | "rv2Planned"
       | "rv2Honored"
+      | "rv2Canceled"
       | "wonCount"
   ) => {
     switch (key) {
@@ -1271,7 +1604,7 @@ export default function DashboardPage() {
             params: {
               from: fromISO,
               to: toISO,
-              limit: 2000,
+              limit: 2000, tz,
             },
           }
         );
@@ -1342,7 +1675,7 @@ export default function DashboardPage() {
           params: {
             from: fromISO,
             to: toISO,
-            limit: 2000,
+            limit: 2000, tz,
           },
         });
         setDrillTitle("Ventes (WON) – détail");
@@ -1350,6 +1683,25 @@ export default function DashboardPage() {
         setDrillOpen(true);
         return;
       }
+      case "rv0Canceled":
+        return openAppointmentsDrill({
+          title: "RV0 annulés (détail)",
+          type: "RV0",
+          status: "CANCELED",
+        });
+      case "rv1Canceled":
+        return openAppointmentsDrill({
+          title: "RV1 annulés (détail)",
+          type: "RV1",
+          status: "CANCELED",
+        });
+      case "rv2Canceled":
+        return openAppointmentsDrill({
+          title: "RV2 annulés (détail)",
+          type: "RV2",
+          status: "CANCELED",
+        });
+
       default:
         return;
     }
@@ -1410,26 +1762,30 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-3 text-xs text-[--muted]">
               <div className="flex items-center gap-2">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    fill="currentColor"
-                    d="M12 1a11 11 0 1 0 11 11A11.013 11.013 0 0 0 12 1m.75 11.44l3.9 2.34a1 1 0 0 1-1.05 1.72l-4.39-2.64a1.5 1.5 0 0 1-.71-1.29V6a1 1 0 0 1 2 0Z"
-                  />
+                <svg width="16" height="16" viewBox="0 0 24 24">
+                  <path fill="currentColor" d="M12 1a11 11 0 1 0 11 11A11.013 11.013 0 0 0 12 1m.75 11.44l3.9 2.34a1 1 0 0 1-1.05 1.72l-4.39-2.64a1.5 1.5 0 0 1-.71-1.29V6a1 1 0 0 1 2 0Z"/>
                 </svg>
                 <Clock />
               </div>
             </div>
+
+            {/* Sélecteur de fuseau horaire */}
+            <select
+              className="text-xs rounded-xl border border-white/10 bg-white/[0.03] px-2 py-1 focus:outline-none"
+              value={tz}
+              onChange={(e) => setTz(e.target.value)}
+              title="Fuseau horaire d’agrégation"
+            >
+              {TIMEZONES.map(z => (
+                <option key={z} value={z}>{z}</option>
+              ))}
+            </select>
+
             <label className="hidden sm:flex items-center gap-2 text-xs">
               <input
                 type="checkbox"
                 checked={comparePrev}
-                onChange={(e) =>
-                  setComparePrev(e.target.checked)
-                }
+                onChange={(e) => setComparePrev(e.target.checked)}
               />
               Comparer période précédente
             </label>
@@ -1444,6 +1800,7 @@ export default function DashboardPage() {
               Filtres
             </button>
           </div>
+
         </div>
       </div>
 
@@ -1651,9 +2008,32 @@ export default function DashboardPage() {
                       : undefined
                   )}
                   {chip("WON", N.WON)}
+
+                  {chip("RV0 annulés",
+                    N.RV0_CANCELED,
+                    N.RV0_PLANNED
+                      ? `${Math.round((N.RV0_CANCELED / Math.max(1, N.RV0_PLANNED)) * 100)}% des RV0 planifiés`
+                      : undefined
+                  )}
+                  {chip(
+                    "RV1 annulés",
+                    N.RV1_CANCELED,
+                    N.RV1_PLANNED
+                      ? `${Math.round((N.RV1_CANCELED / Math.max(1, N.RV1_PLANNED)) * 100)}% des RV1 planifiés`
+                      : undefined
+                  )}
+                  {chip(
+                    "RV2 annulés",
+                    N.RV2_CANCELED,
+                    N.RV2_PLANNED
+                      ? `${Math.round((N.RV2_CANCELED / Math.max(1, N.RV2_PLANNED)) * 100)}% des RV2 planifiés`
+                      : undefined
+                  )}
+
                 </div>
               );
-            })()}
+            })
+            ()}
 
             {/* Détails du funnel */}
             <AnimatePresence>
@@ -1684,15 +2064,23 @@ export default function DashboardPage() {
                             N.CALL_ANSWERED,
                           setterNoShow:
                             N.SETTER_NO_SHOW,
+
                           rv0P: N.RV0_PLANNED,
                           rv0H: N.RV0_HONORED,
                           rv0NS: N.RV0_NO_SHOW,
+                          rv0C: N.RV0_CANCELED,
+
                           rv1P: N.RV1_PLANNED,
                           rv1H: N.RV1_HONORED,
                           rv1NS: N.RV1_NO_SHOW,
+                          rv1C: N.RV1_CANCELED,
+
                           rv2P: N.RV2_PLANNED,
                           rv2H: N.RV2_HONORED,
+                          rv2C: N.RV2_CANCELED,
+
                           won: N.WON,
+                          
                         }}
                         onCardClick={onFunnelCardClick}
                       />
@@ -1739,7 +2127,12 @@ export default function DashboardPage() {
                           den={N.RV0_PLANNED}
                           inverse
                         />
-
+                        <KpiRatio
+                          label="RV0 annulé / planifié"
+                          num={N.RV0_CANCELED}
+                          den={N.RV0_PLANNED}
+                          inverse
+                        />
                         <KpiRatio
                           label="RV0 honoré → RV1 planifié"
                           num={N.RV1_PLANNED}
@@ -1756,11 +2149,22 @@ export default function DashboardPage() {
                           den={N.RV1_PLANNED}
                           inverse
                         />
-
+                        <KpiRatio
+                          label="RV1 annulé / planifié"
+                          num={N.RV1_CANCELED}
+                          den={N.RV1_PLANNED}
+                          inverse
+                        />
                         <KpiRatio
                           label="RV2 honoré / planifié"
                           num={N.RV2_HONORED}
                           den={N.RV2_PLANNED}
+                        />
+                        <KpiRatio
+                          label="RV2 annulé / planifié"
+                          num={N.RV2_CANCELED}
+                          den={N.RV2_PLANNED}
+                          inverse
                         />
                         <KpiRatio
                           label="Conversion finale (WON / Leads)"
@@ -2456,6 +2860,110 @@ export default function DashboardPage() {
                 Compté sur la{" "}
                 <b>date/heure du RDV</b> : chaque barre = lundi → dimanche.
               </div>
+              
+              {/* Annulés par jour — RV0/RV1/RV2 en un seul graphe */}
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">Annulés par jour (RV0 / RV1 / RV2)</div>
+                  <div className="text-xs text-[--muted]">
+                    {(canceledDaily?.total ?? 0).toLocaleString("fr-FR")} au total
+                  </div>
+                </div>
+
+                <div className="h-64 mt-2">
+                  {canceledDaily?.byDay?.length ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={canceledDaily.byDay}   // ✅ on garde day = 'YYYY-MM-DD' tel quel
+                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                      >
+                        <defs>
+                          {/* RV0 */}
+                          <linearGradient id="gradRv0Canceled" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#fb7185" stopOpacity={0.95} />
+                            <stop offset="100%" stopColor="#be123c" stopOpacity={0.75} />
+                          </linearGradient>
+                          {/* RV1 */}
+                          <linearGradient id="gradRv1Canceled" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.95} />
+                            <stop offset="100%" stopColor="#b45309" stopOpacity={0.75} />
+                          </linearGradient>
+                          {/* RV2 */}
+                          <linearGradient id="gradRv2Canceled" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
+                            <stop offset="100%" stopColor="#2563eb" stopOpacity={0.75} />
+                          </linearGradient>
+                        </defs>
+
+                        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+
+                        {/* ✅ X en catégorie + formattage d’affichage */}
+                        <XAxis
+                          dataKey="day"
+                          type="category"
+                          tick={{ fill: COLORS.axis, fontSize: 12 }}
+                          tickFormatter={(d: string) => {
+                            const [y, m, dd] = d.split("-");
+                            return `${dd}/${m}/${y}`;
+                          }}
+                        />
+
+                        <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
+
+                        <Tooltip
+                          content={
+                            <ProTooltip
+                              title="Annulés"
+                              valueFormatters={{
+                                RV0_CANCELED: v => fmtInt(v),
+                                RV1_CANCELED: v => fmtInt(v),
+                                RV2_CANCELED: v => fmtInt(v),
+                                total: v => fmtInt(v),
+                              }}
+                            />
+                          }
+                        />
+                        <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+
+                        {/* Pile par jour */}
+                        <Bar
+                          name="RV0 annulés"
+                          dataKey="RV0_CANCELED"
+                          fill="url(#gradRv0Canceled)"
+                          radius={[8, 8, 0, 0]}
+                          maxBarSize={40}
+                          stackId="canceled"
+                        />
+                        <Bar
+                          name="RV1 annulés"
+                          dataKey="RV1_CANCELED"
+                          fill="url(#gradRv1Canceled)"
+                          radius={[8, 8, 0, 0]}
+                          maxBarSize={40}
+                          stackId="canceled"
+                        />
+                        <Bar
+                          name="RV2 annulés"
+                          dataKey="RV2_CANCELED"
+                          fill="url(#gradRv2Canceled)"
+                          radius={[8, 8, 0, 0]}
+                          maxBarSize={40}
+                          stackId="canceled"
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-[--muted] text-sm">
+                      Pas de données.
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-[--muted] mt-2">
+                  Agrégation par <b>jour</b> dans le fuseau <b>{tz}</b>. Affiche le total d’annulations par jour (pile RV0, RV1, RV2).
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2571,7 +3079,7 @@ export default function DashboardPage() {
                         <div className="text-lg font-semibold">
                           {
                             sortedSetters[0]
-                              .rv1FromHisLeads
+                              .rv1PlannedOnHisLeads
                           }{" "}
                           RV1
                         </div>
@@ -2661,89 +3169,62 @@ export default function DashboardPage() {
             </div>
 
             {/* Spotlight tables */}
-            <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="mt-5 grid grid-cols-1 gap-4">
               {/* Closers */}
               <div className="rounded-3xl border border-white/10 bg-[rgba(18,24,38,.6)] backdrop-blur-xl overflow-hidden">
                 <div className="px-4 py-2 text-xs uppercase tracking-wider border-b border-white/10 bg-[linear-gradient(90deg,rgba(16,185,129,.15),transparent)]">
                   👥 Spotlight Closers
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[760px]">
+                  <table className="w-full text-sm min-w-[1080px]">
                     <thead className="text-left text-[--muted] text-xs sticky top-0 bg-[rgba(18,24,38,.8)] backdrop-blur-md">
                       <tr>
-                        <th className="py-2.5 px-3">
-                          Closer
-                        </th>
-                        <th className="py-2.5 px-3">
-                          Taux closing
-                        </th>
-                        <th className="py-2.5 px-3">
-                          Ventes
-                        </th>
-                        <th className="py-2.5 px-3">
-                          RV1 honorés
-                        </th>
-                        <th className="py-2.5 px-3">
-                          CA
-                        </th>
+                        <th className="py-2.5 px-3">Closer</th>
+                        <th className="py-2.5 px-3">RV1 planifiés</th>
+                        <th className="py-2.5 px-3">RV1 honorés</th>
+                        <th className="py-2.5 px-3">RV1 annulés</th>
+                        <th className="py-2.5 px-3">% annulation RV1</th>
+                        <th className="py-2.5 px-3">RV2 planifiés</th>
+                        <th className="py-2.5 px-3">RV2 annulés</th>
+                        <th className="py-2.5 px-3">% annulation RV2</th>
+                        <th className="py-2.5 px-3">Ventes</th>
+                        <th className="py-2.5 px-3">CA</th>
+                        <th className="py-2.5 px-3">Taux closing</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedClosers
-                        .slice(0, 8)
-                        .map((c, i) => (
-                          <tr
-                            key={c.userId}
-                            className="border-t border-white/10 hover:bg-white/[0.04] transition-colors"
-                          >
-                            <td className="py-2.5 px-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-[--muted] w-5">
-                                  {i < 3
-                                    ? ["🥇", "🥈", "🥉"][
-                                        i
-                                      ]
-                                    : `#${i + 1}`}
-                                </span>
-                                <div className="min-w-0">
-                                  <div className="font-medium truncate">
-                                    {c.name}
-                                  </div>
-                                  <div className="text-[10px] text-[--muted] truncate">
-                                    {c.email}
-                                  </div>
-                                </div>
+                      {sortedClosers.slice(0, 8).map((c, i) => (
+                        <tr key={c.userId} className="border-t border-white/10 hover:bg-white/[0.04] transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-[--muted] w-5">
+                                {i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{c.name}</div>
+                                <div className="text-[10px] text-[--muted] truncate">{c.email}</div>
                               </div>
-                            </td>
-                            <td className="py-2.5 px-3 font-semibold">
-                              {Math.round(
-                                (c.closingRate || 0) *
-                                  100
-                              )}
-                              %
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {c.salesClosed}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {c.rv1Honored}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {(c.revenueTotal || 0).toLocaleString(
-                                "fr-FR"
-                              )}{" "}
-                              €
-                            </td>
-                          </tr>
-                        ))}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">{c.rv1Planned ?? 0}</td>
+                          <td className="py-2.5 px-3">{c.rv1Honored ?? 0}</td>
+                          <td className="py-2.5 px-3">{c.rv1Canceled ?? 0}</td>
+                          <td className="py-2.5 px-3">{fmtPct(c.rv1Canceled, c.rv1Planned)}</td>
+                          <td className="py-2.5 px-3">{c.rv2Planned ?? 0}</td>
+                          <td className="py-2.5 px-3">{c.rv2Canceled ?? 0}</td>
+                          <td className="py-2.5 px-3">{fmtPct(c.rv2Canceled, c.rv2Planned)}</td>
+                          <td className="py-2.5 px-3">{c.salesClosed ?? 0}</td>
+                          <td className="py-2.5 px-3">
+                            {(c.revenueTotal || 0).toLocaleString("fr-FR")} €
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold">
+                            {Math.round((c.closingRate || 0) * 100)}%
+                          </td>
+                        </tr>
+                      ))}
                       {!sortedClosers.length && (
                         <tr>
-                          <td
-                            className="py-6 px-3 text-[--muted]"
-                            colSpan={5}
-                          >
-                            Aucune donnée.
-                          </td>
+                          <td className="py-6 px-3 text-[--muted]" colSpan={11}>Aucune donnée.</td>
                         </tr>
                       )}
                     </tbody>
@@ -2757,92 +3238,62 @@ export default function DashboardPage() {
                   ☎️ Spotlight Setters
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[820px]">
+                  <table className="w-full text-sm min-w-[1200px]">
                     <thead className="text-left text-[--muted] text-xs sticky top-0 bg-[rgba(18,24,38,.8)] backdrop-blur-md">
                       <tr>
-                        <th className="py-2.5 px-3">
-                          Setter
-                        </th>
-                        <th className="py-2.5 px-3">
-                          RV1 (ses leads)
-                        </th>
-                        <th className="py-2.5 px-3">
-                          Taux qualification
-                        </th>
-                        <th className="py-2.5 px-3">
-                          Leads
-                        </th>
-                        <th className="py-2.5 px-3">
-                          RV0
-                        </th>
-                        <th className="py-2.5 px-3">
-                          TTFC
-                        </th>
+                        <th className="py-2.5 px-3">Setter</th>
+                        <th className="py-2.5 px-3">Leads reçus</th>
+                        <th className="py-2.5 px-3">RV1 planifiés (ses leads)</th>
+                        <th className="py-2.5 px-3">RV1 honorés (ses leads)</th>
+                        <th className="py-2.5 px-3">RV1 annulés (ses leads)</th>
+                        <th className="py-2.5 px-3">% annulation RV1</th>
+                        <th className="py-2.5 px-3">Ventes (depuis ses leads)</th>
+                        <th className="py-2.5 px-3">CA (depuis ses leads)</th>
+                        <th className="py-2.5 px-3">TTFC (min)</th>  {/* NEW */}
+                        <th className="py-2.5 px-3">Taux de setting</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedSetters
-                        .slice(0, 8)
-                        .map((s, i) => (
-                          <tr
-                            key={s.userId}
-                            className="border-t border-white/10 hover:bg-white/[0.04] transition-colors"
-                          >
-                            <td className="py-2.5 px-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-[--muted] w-5">
-                                  {i < 3
-                                    ? ["🥇", "🥈", "🥉"][
-                                        i
-                                      ]
-                                    : `#${i + 1}`}
-                                </span>
-                                <div className="min-w-0">
-                                  <div className="font-medium truncate">
-                                    {s.name}
-                                  </div>
-                                  <div className="text-[10px] text-[--muted] truncate">
-                                    {s.email}
-                                  </div>
-                                </div>
+                      {sortedSetters.slice(0, 8).map((s, i) => (
+                        <tr key={s.userId} className="border-t border-white/10 hover:bg-white/[0.04] transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-[--muted] w-5">
+                                {i < 3 ? ["🥇","🥈","🥉"][i] : `#${i+1}`}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{s.name}</div>
+                                <div className="text-[10px] text-[--muted] truncate">{s.email}</div>
                               </div>
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {s.rv1FromHisLeads ?? 0}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {Math.round(
-                                (s.qualificationRate ||
-                                  0) * 100
-                              )}
-                              %
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {s.leadsReceived ?? 0}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {s.rv0Count ?? 0}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {s.ttfcAvgMinutes ?? "—"}{" "}
-                              min
-                            </td>
-                          </tr>
-                        ))}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">{s.leadsReceived ?? 0}</td>
+                          <td className="py-2.5 px-3">{s.rv1PlannedOnHisLeads ?? 0}</td>
+                          <td className="py-2.5 px-3">{s.rv1DoneOnHisLeads ?? 0}</td>       {/* ✅ honorés */}
+                          <td className="py-2.5 px-3">{s.rv1CanceledOnHisLeads ?? 0}</td>
+                          <td className="py-2.5 px-3">{fmtPct(s.rv1CanceledOnHisLeads, s.rv1PlannedOnHisLeads)}</td>
+                          <td className="py-2.5 px-3">{s.salesFromHisLeads ?? 0}</td>
+                          <td className="py-2.5 px-3">
+                            {(s.revenueFromHisLeads || 0).toLocaleString("fr-FR")} €
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {s.ttfcAvgMinutes == null ? "—" : s.ttfcAvgMinutes}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold">
+                            {Math.round(((s.settingRate ?? 0) * 100))}%                 {/* ✅ settingRate */}
+                          </td>
+                        </tr>
+                      ))}
                       {!sortedSetters.length && (
                         <tr>
-                          <td
-                            className="py-6 px-3 text-[--muted]"
-                            colSpan={6}
-                          >
-                            Aucune donnée.
-                          </td>
+                          <td className="py-6 px-3 text-[--muted]" colSpan={10}>Aucune donnée.</td>
                         </tr>
                       )}
                     </tbody>
                   </table>
                 </div>
               </div>
+
             </div>
 
             {/* DUO STRIP */}
@@ -2926,6 +3377,94 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+
+            {/* ===== Exports Spotlight ===== */}
+            <div className="card">
+              <div className="text-sm font-medium mb-1">Exports Spotlight (Setters / Closers)</div>
+              <div className="text-[12px] text-[--muted] mb-2">
+                Télécharge les rapports détaillés avec analyse (PDF) ou les données brutes (CSV) pour la période sélectionnée.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    const res = await api.get(`/reporting/export/spotlight-setters.pdf`, {
+                      params: { from: fromISO, to: toISO, tz },
+                      responseType: 'blob',
+                    });
+                    const url = URL.createObjectURL(res.data);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `spotlight_setters_${fromISO || 'from'}_${toISO || 'to'}.pdf`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  PDF Setters
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={async () => {
+                    const res = await api.get(`/reporting/export/spotlight-setters.csv`, {
+                      params: { from: fromISO, to: toISO, tz },
+                      responseType: 'blob',
+                    });
+                    const url = URL.createObjectURL(res.data);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `spotlight_setters_${fromISO || 'from'}_${toISO || 'to'}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  CSV Setters
+                </button>
+
+                <div className="w-px h-6 bg-white/10 mx-2" />
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    const res = await api.get(`/reporting/export/spotlight-closers.pdf`, {
+                      params: { from: fromISO, to: toISO, tz },
+                      responseType: 'blob',
+                    });
+                    const url = URL.createObjectURL(res.data);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `spotlight_closers_${fromISO || 'from'}_${toISO || 'to'}.pdf`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  PDF Closers
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={async () => {
+                    const res = await api.get(`/reporting/export/spotlight-closers.csv`, {
+                      params: { from: fromISO, to: toISO, tz },
+                      responseType: 'blob',
+                    });
+                    const url = URL.createObjectURL(res.data);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `spotlight_closers_${fromISO || 'from'}_${toISO || 'to'}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  CSV Closers
+                </button>
+              </div>
+            </div>
+
 
             {/* Vues additionnelles */}
             {view === "exports" && (
@@ -3130,3 +3669,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+
