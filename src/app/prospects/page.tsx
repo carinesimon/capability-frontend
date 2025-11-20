@@ -1,5 +1,5 @@
 "use client";
-
+import { reportingApi } from "@/lib/reporting";
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import api from "@/lib/api";
@@ -7,6 +7,7 @@ import Sidebar from "@/components/Sidebar";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 import { currentMonthRange } from "@/lib/date";
 import { motion, AnimatePresence } from "framer-motion";
+// en haut du fichier
 
 /* ================== Types alignés backend ================== */
 type LeadStage =
@@ -19,16 +20,21 @@ type LeadStage =
   | "RV0_PLANNED"
   | "RV0_HONORED"
   | "RV0_NO_SHOW"
+  | "RV0_CANCELED"   // 👈 NEW
   | "RV1_PLANNED"
   | "RV1_HONORED"
   | "RV1_NO_SHOW"
   | "RV1_POSTPONED"
+  | "RV1_CANCELED"   // 👈 NEW
   | "RV2_PLANNED"
   | "RV2_HONORED"
+  | "RV2_NO_SHOW"
   | "RV2_POSTPONED"
+  | "RV2_CANCELED"   // 👈 NEW
   | "NOT_QUALIFIED"
   | "LOST"
   | "WON";
+
 
   // Stage côté DTO backend (create-prospect-event.dto.ts)
 type StageDto =
@@ -45,6 +51,10 @@ type StageDto =
   | "RV1_NO_SHOW"
   | "RV2_PLANIFIE"
   | "RV2_HONORE"
+  | "RV2_NO_SHOW"
+  | "RV0_ANNULE"   
+  | "RV1_ANNULE"   
+  | "RV2_ANNULE"  
   | "WON"
   | "LOST"
   | "NOT_QUALIFIED";
@@ -60,19 +70,23 @@ const LEADSTAGE_TO_STAGEDTO: Partial<Record<LeadStage, StageDto>> = {
   RV0_PLANNED: "RV0_PLANIFIE",
   RV0_HONORED: "RV0_HONORE",
   RV0_NO_SHOW: "RV0_NO_SHOW",
+  RV0_CANCELED: "RV0_ANNULE",
 
   RV1_PLANNED: "RV1_PLANIFIE",
   RV1_HONORED: "RV1_HONORE",
   RV1_NO_SHOW: "RV1_NO_SHOW",
+  RV1_CANCELED: "RV1_ANNULE",
 
   RV2_PLANNED: "RV2_PLANIFIE",
   RV2_HONORED: "RV2_HONORE",
+  RV2_NO_SHOW: "RV2_NO_SHOW",
+
+  RV2_CANCELED: "RV2_ANNULE",
 
   WON: "WON",
   LOST: "LOST",
   NOT_QUALIFIED: "NOT_QUALIFIED",
 };
-
 
 /** Config d’une colonne dynamique (sauvegardée côté backend) */
 type ColumnConfig = {
@@ -218,7 +232,13 @@ const STAGE_COLOR: Record<LeadStage, string> = {
 
   RV2_PLANNED: "from-sky-400/70 to-sky-300/30",
   RV2_HONORED: "from-green-400/70 to-green-300/30",
+  RV2_NO_SHOW: "from-rose-400/70 to-rose-300/30",
+
   RV2_POSTPONED: "from-amber-400/70 to-amber-300/30",
+
+  RV0_CANCELED: "from-rose-400/70 to-rose-300/30",
+  RV1_CANCELED: "from-rose-400/70 to-rose-300/30",
+  RV2_CANCELED: "from-rose-400/70 to-rose-300/30",
 
   NOT_QUALIFIED: "from-zinc-500/70 to-zinc-400/30",
   LOST: "from-red-500/80 to-red-400/40",
@@ -236,6 +256,10 @@ const STAGE_DOT: Record<LeadStage, string> = {
   RV0_HONORED: "bg-emerald-400",
   RV0_NO_SHOW: "bg-rose-400",
 
+  RV0_CANCELED: "bg-rose-400",
+  RV1_CANCELED: "bg-rose-400",
+  RV2_CANCELED: "bg-rose-400",
+
   RV1_PLANNED: "bg-cyan-400",
   RV1_HONORED: "bg-green-400",
   RV1_NO_SHOW: "bg-rose-400",
@@ -243,6 +267,8 @@ const STAGE_DOT: Record<LeadStage, string> = {
 
   RV2_PLANNED: "bg-sky-400",
   RV2_HONORED: "bg-green-400",
+  RV2_NO_SHOW: "bg-rose-400",
+
   RV2_POSTPONED: "bg-amber-400",
 
   NOT_QUALIFIED: "bg-zinc-400",
@@ -267,7 +293,11 @@ const STAGE_TO_EVENT: Record<LeadStage, string> = {
   RV1_POSTPONED: "APPOINTMENT_POSTPONED_RV1",
   RV2_PLANNED: "APPOINTMENT_PLANNED_RV2",
   RV2_HONORED: "APPOINTMENT_HONORED_RV2",
+  RV2_NO_SHOW: "APPOINTMENT_NOSHOW_RV2",
   RV2_POSTPONED: "APPOINTMENT_POSTPONED_RV2",
+  RV0_CANCELED: "APPOINTMENT_CANCELED_RV0",
+  RV1_CANCELED: "APPOINTMENT_CANCELED_RV1",
+  RV2_CANCELED: "APPOINTMENT_CANCELED_RV2",
   NOT_QUALIFIED: "NOT_QUALIFIED",
   LOST: "LOST",
   WON: "WON",
@@ -284,17 +314,29 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: "c_rv0_p", order: 10, enabled: true, label: "RV0 planifiés", stage: "RV0_PLANNED" },
   { id: "c_rv0_h", order: 11, enabled: true, label: "RV0 honorés", stage: "RV0_HONORED" },
   { id: "c_rv0_ns", order: 12, enabled: true, label: "RV0 no-show", stage: "RV0_NO_SHOW" },
+  { id: "c_rv0_can",  order: 13, enabled: true, label: "RV0 annulés",   stage: "RV0_CANCELED" }, // 👈 NEW
+
   { id: "c_rv1_p", order: 20, enabled: true, label: "RV1 planifiés", stage: "RV1_PLANNED" },
   { id: "c_rv1_h", order: 21, enabled: true, label: "RV1 honorés", stage: "RV1_HONORED" },
   { id: "c_rv1_ns", order: 22, enabled: true, label: "RV1 no-show", stage: "RV1_NO_SHOW" },
   { id: "c_rv1_post", order: 23, enabled: true, label: "RV1 reportés", stage: "RV1_POSTPONED" },
+  { id: "c_rv1_can",  order: 24, enabled: true, label: "RV1 annulés",    stage: "RV1_CANCELED" }, // 👈 NEW
+
   { id: "c_rv2_p", order: 30, enabled: true, label: "RV2 planifiés", stage: "RV2_PLANNED" },
   { id: "c_rv2_h", order: 31, enabled: true, label: "RV2 honorés", stage: "RV2_HONORED" },
   { id: "c_rv2_post", order: 32, enabled: true, label: "RV2 reportés", stage: "RV2_POSTPONED" },
+  { id: "c_rv2_can",  order: 33, enabled: true, label: "RV2 annulés",    stage: "RV2_CANCELED" }, // 👈 NEW
   { id: "c_notq", order: 90, enabled: true, label: "Non qualifiés", stage: "NOT_QUALIFIED" },
   { id: "c_lost", order: 91, enabled: true, label: "Perdus", stage: "LOST" },
   { id: "c_won", order: 99, enabled: true, label: "Ventes (WON)", stage: "WON" },
 ];
+const RDV_ANNULES_COLUMN: ColumnConfig = {
+  id: "c_rdv_annules",
+  order: 24,
+  enabled: true,
+  label: "RDV annulés",
+  stage: null, // colonne libre
+};
 
 /* ================== Page ================== */
 export default function ProspectsPage() {
@@ -310,6 +352,11 @@ export default function ProspectsPage() {
   const [columns, setColumns] = useState<ColumnConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // autour des autres useState (par ex. après const [err, setErr] = useState<string | null>(null);)
+  const [cancelTotals, setCancelTotals] = useState<{ rv0: number; rv1: number; rv2: number; all: number }>({
+    rv0: 0, rv1: 0, rv2: 0, all: 0
+  });
 
   // Gestion colonnes (brouillon)
   const [manageOpen, setManageOpen] = useState(false);
@@ -435,14 +482,28 @@ export default function ProspectsPage() {
     setBoard(res.data ?? { columns: {} as any });
   }
   async function loadColumnsConfig() {
-    try {
-      const res = await api.get<{ ok: true; columns: ColumnConfig[] }>("/prospects/columns-config");
-      const rows = (res.data?.columns || []).slice().sort((a, b) => a.order - b.order);
-      setColumns(rows.length ? rows : DEFAULT_COLUMNS);
-    } catch {
-      setColumns(DEFAULT_COLUMNS);
+  try {
+    const res = await api.get<{ ok: true; columns: ColumnConfig[] }>("/prospects/columns-config");
+    let rows = (res.data?.columns || []).slice();
+
+    // 🔹 On ajoute la colonne RDV annulés si elle n'existe pas déjà en BDD
+    const hasRdvAnnules = rows.some(c => c.id === RDV_ANNULES_COLUMN.id);
+    if (!hasRdvAnnules) {
+      rows.push(RDV_ANNULES_COLUMN);
     }
+
+    // Tri + normalisation des order
+    rows = rows
+      .sort((a, b) => a.order - b.order)
+      .map((c, idx) => ({ ...c, order: idx }));
+
+    setColumns(rows.length ? rows : [...DEFAULT_COLUMNS, RDV_ANNULES_COLUMN]);
+  } catch {
+    // Si l'API plante, on retombe sur les colonnes par défaut + RDV annulés
+    setColumns([...DEFAULT_COLUMNS, RDV_ANNULES_COLUMN]);
   }
+}
+
   async function saveColumnsConfig(next: ColumnConfig[]) {
     const payload = next.map((c, idx) => ({
       id: c.id,
@@ -470,6 +531,30 @@ export default function ProspectsPage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromISO, toISO]);
+
+  useEffect(() => {
+  let cancelled = false;
+  (async () => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const [rv0, rv1, rv2] = await Promise.all([
+        reportingApi.stageSeries("RV0_CANCELED", fromISO, toISO, tz),
+        reportingApi.stageSeries("RV1_CANCELED", fromISO, toISO, tz),
+        reportingApi.stageSeries("RV2_CANCELED", fromISO, toISO, tz),
+      ]);
+      if (!cancelled) {
+        const v0 = rv0?.total ?? 0;
+        const v1 = rv1?.total ?? 0;
+        const v2 = rv2?.total ?? 0;
+        setCancelTotals({ rv0: v0, rv1: v1, rv2: v2, all: v0 + v1 + v2 });
+      }
+    } catch {
+      if (!cancelled) setCancelTotals({ rv0: 0, rv1: 0, rv2: 0, all: 0 });
+    }
+  })();
+  return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [fromISO, toISO]);
 
   /* ================== (FIX) traçage d’incrément sans bruit console ================== */
     const stageEventsSupportedRef = useRef<boolean>(true);
@@ -513,7 +598,6 @@ export default function ProspectsPage() {
       if (target.stage === "WON") {
         try {
           await api.patch(`/prospects/${dragLead.id}/stage`, { stage: "WON" });
-          await trackStageIncrement(dragLead.id, "WON");
           await loadBoard();
         } catch (e: any) {
           const code = e?.response?.data?.code;
@@ -530,7 +614,6 @@ export default function ProspectsPage() {
       }
       try {
         await api.patch(`/prospects/${dragLead.id}/stage`, { stage: target.stage });
-        await trackStageIncrement(dragLead.id, target.stage as LeadStage);
         await loadBoard();
       } catch (e: any) {
         setErr(e?.response?.data?.message || "Impossible de changer de colonne");
@@ -556,9 +639,11 @@ export default function ProspectsPage() {
     if (!askWon.lead) return;
     try {
       await api.patch(`/prospects/${askWon.lead.id}/stage`, { stage: "WON", confirmSame: true });
-      await trackStageIncrement(askWon.lead.id, "WON");
+      // (plus d'appel trackStageIncrement ici)
       setAskWon({ open: false, lead: null });
       await loadBoard();
+
+
     } catch (e: any) {
       setErr(e?.response?.data?.message || "Erreur validation WON");
     }
@@ -569,7 +654,7 @@ export default function ProspectsPage() {
     if (Number.isNaN(v) || v < 0) return setErr("Valeur de vente invalide");
     try {
       await api.patch(`/prospects/${askWon.lead.id}/stage`, { stage: "WON", saleValue: v });
-      await trackStageIncrement(askWon.lead.id, "WON");
+      // (plus d'appel trackStageIncrement ici)
       setAskWon({ open: false, lead: null });
       await loadBoard();
     } catch (e: any) {
@@ -925,20 +1010,31 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                     const mappedStage = col.stage as LeadStage | undefined;
 
                     // Récup items : stage mappé → board.columns[stage], sinon → extraByColumnKey
-                    let items: Lead[] = [];
-                    if (mappedStage && board?.columns?.[mappedStage]) {
-                      items = board.columns[mappedStage].items;
-                    } else if (!mappedStage && board?.extraByColumnKey?.[col.id]) {
-                      items = board.extraByColumnKey[col.id];
-                    }
-                    // filtre UI
-                    items = items.filter(matchFilter);
+                    // ...
+                  let items: Lead[] = [];
+                  if (mappedStage && board?.columns?.[mappedStage]) {
+                    items = board.columns[mappedStage].items;
+                  } else if (!mappedStage && board?.extraByColumnKey?.[col.id]) {
+                    items = board.extraByColumnKey[col.id];
+                  }
+                  items = items.filter(matchFilter);
 
-                    const count = items.length;
-                    const sOppoNum = items.reduce((s, l) => s + (l.opportunityValue ?? 0), 0);
-                    const sSalesNum = items.reduce((s, l) => s + (l.saleValue ?? 0), 0);
-                    const sOppo = fmtEUR(sOppoNum);
-                    const sSales = fmtEUR(sSalesNum);
+                  // --- compteur affiché ---
+                  // par défaut: nombre d'items visibles
+                  let count = items.length;
+
+                  // si colonne "annulés" mappée à un stage, on affiche le total historique
+                  if (mappedStage === "RV0_CANCELED") count = cancelTotals.rv0;
+                  if (mappedStage === "RV1_CANCELED") count = cancelTotals.rv1;
+                  if (mappedStage === "RV2_CANCELED") count = cancelTotals.rv2;
+
+                  // si colonne libre "RDV annulés" (sans mapping), on affiche la somme des trois
+                  if (!mappedStage && col.id === RDV_ANNULES_COLUMN.id) count = cancelTotals.all;
+
+                  const sOppoNum = items.reduce((s, l) => s + (l.opportunityValue ?? 0), 0);
+                  const sSalesNum = items.reduce((s, l) => s + (l.saleValue ?? 0), 0);
+                  const sOppo = fmtEUR(sOppoNum);
+                  const sSales = fmtEUR(sSalesNum);
 
                     return (
                       <div key={col.id} className="card min-h-[72vh] p-3"
@@ -1238,6 +1334,7 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                             <option value="RV0_PLANNED">RV0_PLANNED</option>
                             <option value="RV0_HONORED">RV0_HONORED</option>
                             <option value="RV0_NO_SHOW">RV0_NO_SHOW</option>
+                            <option value="RV0_CANCELED">RV0_CANCELED</option>
                           </optgroup>
 
                           <optgroup label="RV1">
@@ -1245,12 +1342,15 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                             <option value="RV1_HONORED">RV1_HONORED</option>
                             <option value="RV1_NO_SHOW">RV1_NO_SHOW</option>
                             <option value="RV1_POSTPONED">RV1_POSTPONED</option>
+                            <option value="RV1_CANCELED">RV1_CANCELED</option>
                           </optgroup>
 
                           <optgroup label="RV2">
                             <option value="RV2_PLANNED">RV2_PLANNED</option>
                             <option value="RV2_HONORED">RV2_HONORED</option>
+                            <option value="RV2_NO_SHOW">RV2_NO_SHOW</option>
                             <option value="RV2_POSTPONED">RV2_POSTPONED</option>
+                            <option value="RV2_CANCELED">RV2_CANCELED</option>
                           </optgroup>
 
                           <optgroup label="Sorties">
