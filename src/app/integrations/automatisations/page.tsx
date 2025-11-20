@@ -1,177 +1,224 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
 import api from "@/lib/api";
 import Sidebar from "@/components/Sidebar";
 
-type Status = "OFF" | "DRY_RUN" | "ON";
-
+/* ======================= Types ======================= */
 type Auto = {
   id: string;
   name: string;
-  status: Status;
-  webhookUrl?: string; // ← peut être undefined sur la liste
-  createdAt?: string;
+  status: "OFF" | "DRY_RUN" | "ON";
+  webhookUrl: string;
+  mappingJson: any; // structure libre
   updatedAt?: string;
 };
 
-export default function AutomatisationsPage() {
-  const [list, setList] = useState<Auto[]>([]);
-  const [name, setName] = useState("");
-  const [created, setCreated] = useState<Auto | null>(null);
+type StageOption = { value: string; label: string };
+
+
+type Ev = {
+  id: string;
+  receivedAt: string;
+  status: "RECEIVED" | "PROCESSED" | "FAILED";
+  error?: string | null;
+  result?: any;
+  payload: any;
+};
+
+// ⚠️ Plus d'énum figée : laisse passer toutes les valeurs de ton schéma Prisma
+type LeadStage = string;
+
+/** Valeurs par défaut (adapter si besoin à ton ENUM Prisma actuel) */
+const STAGE_DEFAULTS: string[] = [
+  "LEADS_RECEIVED",
+  "CALL_REQUESTED",
+  "CALL_ATTEMPT",
+  "CALL_ANSWERED",
+  "SETTER_NO_SHOW",
+  "FOLLOW_UP",
+
+  "RV0_PLANNED",
+  "RV0_HONORED",
+  "RV0_NO_SHOW",
+  "RV0_CANCELED",
+
+  "RV1_PLANNED",
+  "RV1_HONORED",
+  "RV1_NO_SHOW",
+  "RV1_POSTPONED",
+  "RV1_CANCELED",
+
+  "RV2_PLANNED",
+  "RV2_HONORED",
+  "RV2_POSTPONED",
+  "RV2_CANCELED",
+
+  "WON",
+  "LOST",
+  "NOT_QUALIFIED",
+];
+
+
+/** Alias ancien schéma → nouveau (migration silencieuse) */
+const LEGACY_TO_NEW: Record<string, string> = {
+  LEAD_RECU: "LEADS_RECEIVED",
+  DEMANDE_APPEL: "CALL_REQUESTED",
+  APPEL_PASSE: "CALL_ATTEMPT",
+  APPEL_REPONDU: "CALL_ANSWERED",
+  NO_SHOW_SETTER: "SETTER_NO_SHOW",
+  FOLLOW_UP: "FOLLOW_UP",
+
+  RV0_PLANIFIE: "RV0_PLANNED",
+  RV0_HONORE:  "RV0_HONORED",
+  RV0_NO_SHOW: "RV0_NO_SHOW",
+  RV0_CANCELED: 'RV0_CANCELED',
+
+  RV1_PLANIFIE: "RV1_PLANNED",
+  RV1_HONORE:  "RV1_HONORED",
+  RV1_NO_SHOW: "RV1_NO_SHOW",
+  RV1_CANCELED: 'RV1_CANCELED',
+
+  RV2_PLANIFIE: "RV2_PLANNED",
+  RV2_HONORE:  "RV2_HONORED",
+  RV2_CANCELED: 'RV2_CANCELED',
+
+  WON: "WON",
+  LOST: "LOST",
+  NOT_QUALIFIED: "NOT_QUALIFIED",
+};
+
+
+/* ======================= Page ======================= */
+export default function AutomationPage() {
+  // ⚠️ IMPORTANT: on utilise useParams (pas de { params } dans la signature)
+  const params = useParams<{ id: string }>();
+  const id = (params?.id ?? "") as string;
+
+  const [a, setA] = useState<Auto | null>(null);
+  const [events, setEvents] = useState<Ev[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
-  // UI
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Status | "ALL">("ALL");
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState<string>("");
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [modal, setModal] = useState<{ open: boolean; ok: boolean; message: string }>({
+    open: false,
+    ok: true,
+    message: "",
+  });
 
-  // Compteur TOTAL d’événements
-  const [totalCounts, setTotalCounts] = useState<Record<string, number>>({});
+  const [dragPath, setDragPath] = useState<string | null>(null);
 
-  // Toast
-  const [toast, setToast] = useState<{ open: boolean; ok: boolean; msg: string }>({ open: false, ok: true, msg: "" });
-  const showToast = (ok: boolean, msg: string) => {
-    setToast({ open: true, ok, msg });
-    setTimeout(() => setToast((t) => ({ ...t, open: false })), 1600);
-  };
-
+  /* ======================= Data load ======================= */
   async function load() {
+    if (!id) return;
     try {
-      const r = await api.get<Auto[]>("/integrations/automations");
-      const ordered = [...(Array.isArray(r.data) ? r.data : [])].sort((a, b) => {
-        const da = a?.updatedAt || a?.createdAt || "";
-        const db = b?.updatedAt || b?.createdAt || "";
-        return db.localeCompare(da);
-      });
-      setList(ordered);
-      fetchTotals(ordered);
+      const [ra, re] = await Promise.all([
+        api.get<Auto>(`/integrations/automations/${id}`),
+        api.get<Ev[]>(`/integrations/automations/${id}/events`, { params: { limit: 30 } }),
+      ]);
+      setA(ra.data);
+      setEvents(Array.isArray(re.data) ? re.data : []);
+      setErr(null);
     } catch (e: any) {
       setErr(e?.response?.data?.message || "Erreur chargement");
+      setA(null);
+      setEvents([]);
     }
   }
-  useEffect(() => { load(); }, []);
 
-  async function fetchTotals(items: Auto[]) {
-    const pairs = await Promise.all(
-      items.map(async (a) => {
-        try {
-          const r = await api.get(`/integrations/automations/${a.id}/events`, { params: { limit: 1000 } });
-          const arr = Array.isArray(r.data) ? r.data : [];
-          return [a.id, arr.length] as const;
-        } catch {
-          return [a.id, 0] as const;
-        }
-      })
-    );
-    const map: Record<string, number> = {};
-    pairs.forEach(([id, n]) => (map[id] = n));
-    setTotalCounts(map);
-  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
-  async function create() {
-    if (!name.trim()) return;
+  /* ======================= Actions ======================= */
+  async function setStatus(s: Auto["status"]) {
+    if (!id) return;
     try {
-      const r = await api.post<Auto>("/integrations/automations", { name: name.trim() });
-      setCreated(r.data);
-      setName("");
-      showToast(true, "Automation créée");
+      await api.patch(`/integrations/automations/${id}`, { status: s });
       await load();
     } catch (e: any) {
-      setErr(e?.response?.data?.message || "Création impossible");
-      showToast(false, "Création impossible");
+      setErr(e?.response?.data?.message || "Changement de statut impossible");
     }
   }
 
-  async function setStatusApi(id: string, status: Status) {
-    try {
-      setSavingId(id);
-      await api.patch(`/integrations/automations/${id}`, { status });
-      await load();
-      showToast(true, "Statut mis à jour");
-    } catch (e: any) {
-      showToast(false, e?.response?.data?.message || "Échec mise à jour statut");
-    } finally {
-      setSavingId(null);
-    }
-  }
+  /** Normalise les noms de stages côté mapping avant enregistrement */
+  function normalizeStageNames(m: any) {
+    const out = structuredClone(m || {});
+    const node = out;
 
-  async function saveName(id: string) {
-    const newName = editingName.trim();
-    if (!newName) { setEditingId(null); return; }
-    try {
-      setSavingId(id);
-      await api.patch(`/integrations/automations/${id}`, { name: newName });
-      setEditingId(null);
-      showToast(true, "Nom mis à jour");
-      await load();
-    } catch (e: any) {
-      showToast(false, e?.response?.data?.message || "Échec renommage");
-    } finally {
-      setSavingId(null);
+    if (node?.stage?.fixed) {
+      node.stage.fixed = LEGACY_TO_NEW[node.stage.fixed] ?? node.stage.fixed;
     }
-  }
-
-  async function duplicate(id: string) {
-    try {
-      setSavingId(id);
-      const r = await api.post(`/integrations/automations/${id}/duplicate`);
-      if (r?.data?.id) {
-        showToast(true, "Dupliquée");
-        await load();
-      } else {
-        showToast(false, "Duplication non supportée");
+    if (node?.stage?.table?.fallback) {
+      node.stage.table.fallback = LEGACY_TO_NEW[node.stage.table.fallback] ?? node.stage.table.fallback;
+    }
+    if (node?.stage?.table?.map) {
+      const map: Record<string, string> = node.stage.table.map;
+      for (const k of Object.keys(map)) {
+        const v = map[k];
+        map[k] = LEGACY_TO_NEW[v] ?? v;
       }
-    } catch {
-      showToast(false, "Duplication non supportée côté API");
-    } finally {
-      setSavingId(null);
+    }
+    return out;
+  }
+
+  async function saveMapping() {
+    if (!id) return;
+    try {
+      const raw = a?.mappingJson || {};
+      const normalized = normalizeStageNames(raw);
+      await api.patch(`/integrations/automations/${id}`, { mappingJson: normalized });
+      setModal({ open: true, ok: true, message: "Mapping enregistré avec succès." });
+      setTimeout(() => setModal((m) => ({ ...m, open: false })), 1400);
+      await load();
+    } catch (e: any) {
+      setModal({ open: true, ok: false, message: e?.response?.data?.message || "Échec de l’enregistrement." });
     }
   }
 
-  async function remove(id: string) {
+  async function deleteAutomation() {
+    if (!id) return;
     if (!confirm("Supprimer cette automation ?")) return;
     try {
-      setSavingId(id);
       await api.delete(`/integrations/automations/${id}`);
-      await load();
-      showToast(true, "Automation supprimée");
+      window.location.href = "/integrations/automatisations";
     } catch (e: any) {
-      showToast(false, e?.response?.data?.message || "Suppression impossible");
-    } finally {
-      setSavingId(null);
+      setErr(e?.response?.data?.message || "Suppression impossible");
     }
   }
 
-  // --- COPY WEBHOOK URL (robuste) ---
-  async function copyWebhook(a: Auto) {
+  /* ======================= Helpers ======================= */
+  const lastPayload = useMemo(() => (events?.[0]?.payload ?? {}), [events]);
+
+  const getByPath = (obj: any, path?: string) => {
+    if (!path) return undefined;
     try {
-      // 1) si déjà présent sur la carte, on l’utilise
-      let url = a.webhookUrl;
-
-      // 2) sinon, on va chercher le détail (qui renvoie l’URL complète basée sur PUBLIC_BASE_URL)
-      if (!url) {
-        const r = await api.get<Auto>(`/integrations/automations/${a.id}`);
-        url = r?.data?.webhookUrl;
-      }
-
-      // 3) si toujours pas dispo → erreur explicite
-      if (!url) {
-        showToast(false, "URL introuvable pour cette automation");
-        return;
-      }
-
-      await navigator.clipboard.writeText(url);
-      showToast(true, "Lien copié");
+      return path.split(".").reduce((acc: any, k: string) => (acc != null ? acc[k] : undefined), obj);
     } catch {
-      showToast(false, "Copie impossible");
+      return undefined;
     }
-  }
+  };
 
-  const statusChip = (s: Status) => (
+  const sampleEntries = useMemo(() => {
+    const out: Array<{ path: string; value: any }> = [];
+    const walk = (obj: any, base: string) => {
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        for (const k of Object.keys(obj)) {
+          const next = base ? `${base}.${k}` : k;
+          const v = (obj as any)[k];
+          if (v && typeof v === "object" && !Array.isArray(v)) walk(v, next);
+          else out.push({ path: next, value: v });
+        }
+      } else if (base) {
+        out.push({ path: base, value: obj });
+      }
+    };
+    walk(lastPayload, "");
+    return out.sort((a, b) => a.path.localeCompare(b.path));
+  }, [lastPayload]);
+
+  const statusChip = (s: Auto["status"]) => (
     <span
       className={
         "text-2xs px-2 py-0.5 rounded " +
@@ -181,31 +228,173 @@ export default function AutomatisationsPage() {
           ? "bg-amber-500/20 text-amber-300"
           : "bg-zinc-500/20 text-zinc-300")
       }
-      title={s === "ON" ? "Active: traite et écrit en base" : s === "DRY_RUN" ? "Test: traite sans écrire en base" : "OFF: n'exécute rien"}
+      title={
+        s === "ON"
+          ? "Active: traite et écrit en base"
+          : s === "DRY_RUN"
+          ? "Test: traite sans écrire en base"
+          : "OFF: n'exécute rien"
+      }
     >
       {s === "ON" ? "Active" : s === "DRY_RUN" ? "Test (dry-run)" : "Off"}
     </span>
   );
 
-  const filtered = useMemo(() => {
-    const term = (q ?? "").trim().toLowerCase();
-    const s = (v: unknown) => (typeof v === "string" ? v.toLowerCase() : "");
+  // ----- Mutateurs mappingJson -----
+  const setFieldFrom = (field: string, fromPath: string | null) => {
+    if (!a) return;
+    const next = structuredClone(a);
+    next.mappingJson ??= {};
+    next.mappingJson.fields ??= {};
+    next.mappingJson.fields[field] ??= {};
+    if (fromPath) next.mappingJson.fields[field].from = fromPath;
+    else delete next.mappingJson.fields[field].from;
+    setA(next);
+  };
 
-    return (Array.isArray(list) ? list : [])
-      .filter((a) => (statusFilter === "ALL" ? true : a?.status === statusFilter))
-      .filter((a) => {
-        if (!term) return true;
-        const name = s(a?.name);
-        const url  = s(a?.webhookUrl || "");
-        const id   = s(a?.id);
-        return name.includes(term) || url.includes(term) || id.includes(term);
-      })
-      .sort((a, b) => {
-        const da = a?.updatedAt || a?.createdAt || "";
-        const db = b?.updatedAt || b?.createdAt || "";
-        return db.localeCompare(da);
-      });
-  }, [list, q, statusFilter]);
+  const setStageMode = (mode: "fixed" | "table" | "none") => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.stage ??= {};
+    n.mappingJson.stage.mode = mode;
+    setA(n);
+  };
+
+  const setStageFixed = (stage: LeadStage) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.stage ??= {};
+    n.mappingJson.stage.fixed = stage;
+    setA(n);
+  };
+
+  const setStageTableFrom = (path: string) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.stage ??= {};
+    n.mappingJson.stage.table ??= {};
+    n.mappingJson.stage.table.from = path;
+    setA(n);
+  };
+
+  const setStageTableMap = (fromValue: string, toStage: LeadStage) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.stage ??= {};
+    n.mappingJson.stage.table ??= {};
+    n.mappingJson.stage.table.map ??= {};
+    n.mappingJson.stage.table.map[fromValue] = toStage;
+    setA(n);
+  };
+
+  const setStageTableFallback = (stage: LeadStage) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.stage ??= {};
+    n.mappingJson.stage.table ??= {};
+    n.mappingJson.stage.table.fallback = stage;
+    setA(n);
+  };
+
+  const setMergeStrategy = (strategy: "preserve" | "overwriteMapped") => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.merge ??= {};
+    n.mappingJson.merge.strategy = strategy;
+    setA(n);
+  };
+
+  const setMergeSkipNull = (skip: boolean) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.merge ??= {};
+    n.mappingJson.merge.skipNull = skip;
+    setA(n);
+  };
+
+  // ----- Mutateurs assign (NOUVEAU) -----
+  const setAssignRoundRobinSetter = (on: boolean) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.assign ??= {};
+    n.mappingJson.assign.roundRobin ??= {};
+    n.mappingJson.assign.roundRobin.setter = on;
+    setA(n);
+  };
+
+  const pushAssignRule = (rule: any) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    n.mappingJson ??= {};
+    n.mappingJson.assign ??= {};
+    n.mappingJson.assign.rules ??= [];
+    n.mappingJson.assign.rules.push(rule);
+    setA(n);
+  };
+
+  const updateAssignRule = (idx: number, patch: any) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    const rules: any[] = n.mappingJson?.assign?.rules || [];
+    if (!rules[idx]) return;
+    rules[idx] = { ...rules[idx], ...patch };
+    n.mappingJson.assign.rules = rules;
+    setA(n);
+  };
+
+  const removeAssignRule = (idx: number) => {
+    if (!a) return;
+    const n = structuredClone(a);
+    const rules: any[] = n.mappingJson?.assign?.rules || [];
+    rules.splice(idx, 1);
+    n.mappingJson.assign.rules = rules;
+    setA(n);
+  };
+
+  // DnD
+  const onDragStartPath = (p: string) => setDragPath(p);
+  const onDragOverDropzone = (e: React.DragEvent) => e.preventDefault();
+  const onDropToField = (field: string) => {
+    if (!dragPath) return;
+    setFieldFrom(field, dragPath);
+    setDragPath(null);
+  };
+
+  /** Champs cibles CRM */
+  const targetFields = [
+    { key: "firstName", label: "Prénom" },
+    { key: "lastName", label: "Nom" },
+    { key: "email", label: "Email" },
+    { key: "phone", label: "Téléphone" },
+    { key: "tag", label: "Tag" },
+    { key: "opportunityValue", label: "Valeur d’opportunité (€)" },
+    { key: "ghlContactId", label: "GHL Contact ID" },
+  ];
+
+  // Liste d’options pour les <select> d’étapes : defaults + valeurs déjà présentes dans le mapping
+  const stageOptions = useMemo(() => {
+    const set = new Set<string>(STAGE_DEFAULTS);
+    const m = a?.mappingJson ?? {};
+    const fixed = m?.stage?.fixed as string | undefined;
+    const fallback = m?.stage?.table?.fallback as string | undefined;
+    const tableMap: Record<string, string> = (m?.stage?.table?.map || {});
+    if (fixed) set.add(LEGACY_TO_NEW[fixed] ?? fixed);
+    if (fallback) set.add(LEGACY_TO_NEW[fallback] ?? fallback);
+    Object.values(tableMap).forEach((v) => set.add(LEGACY_TO_NEW[v] ?? v));
+    return Array.from(set);
+  }, [a]);
+
+  // UI
+  const cannotLoad = !id;
+  const webhookDisplay = a?.webhookUrl || "—";
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
@@ -213,181 +402,456 @@ export default function AutomatisationsPage() {
         <Sidebar />
 
         <div className="flex-1 space-y-4">
-          {/* Header + creation */}
-          <div className="card">
-            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold">Automations (Webhook)</div>
-                <div className="text-xs text-[--muted]">Crée, renomme, filtre, copie l’URL, change le statut.</div>
-              </div>
-              <div className="flex gap-2 w-full sm:w-auto">
-                <input
-                  className="input flex-1"
-                  placeholder="Nom de l’automation"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") create(); }}
-                />
-                <button className="btn btn-primary" onClick={create}>+ Créer</button>
-              </div>
-            </div>
-
-            {created && (
-              <div className="mt-3 text-sm rounded-xl border border-white/10 bg-white/5 p-3">
-                <div>Créée : <b>{created.name}</b></div>
-                <div className="text-[--muted]">URL Webhook : <code>{created.webhookUrl || "—"}</code></div>
-                <div className="text-[--muted]">Statut : {statusChip(created.status)}</div>
-              </div>
-            )}
-          </div>
-
           {err && <div className="text-sm text-red-400">{err}</div>}
+          {cannotLoad && <div className="card">Préparation…</div>}
 
-          {/* Filtres */}
-          <div className="card">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <button
-                  className={`text-2xs px-2 py-1 rounded ${statusFilter==="ALL" ? "bg-white/15 ring-1 ring-white/10" : "hover:bg-white/10"}`}
-                  onClick={()=>setStatusFilter("ALL")}
-                >Tous</button>
-                {(["ON","DRY_RUN","OFF"] as Status[]).map(s => (
-                  <button
-                    key={s}
-                    className={`text-2xs px-2 py-1 rounded ${statusFilter===s ? "bg-white/15 ring-1 ring-white/10" : "hover:bg-white/10"}`}
-                    onClick={()=>setStatusFilter(s)}
-                  >
-                    {statusChip(s)}
+          {!cannotLoad && !a ? (
+            <div className="card">Chargement…</div>
+          ) : !cannotLoad && a ? (
+            <>
+              {/* Header + status */}
+              <div className="card">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">{a.name}</div>
+                  <div className="flex gap-2">
+                    <button className={`btn ${a.status === "OFF" ? "btn-primary" : "btn-ghost"}`} onClick={() => setStatus("OFF")}>
+                      OFF
+                    </button>
+                    <button className={`btn ${a.status === "DRY_RUN" ? "btn-primary" : "btn-ghost"}`} onClick={() => setStatus("DRY_RUN")}>
+                      DRY-RUN
+                    </button>
+                    <button className={`btn ${a.status === "ON" ? "btn-primary" : "btn-ghost"}`} onClick={() => setStatus("ON")}>
+                      ON
+                    </button>
+                    <button className="btn btn-ghost" onClick={deleteAutomation}>
+                      Supprimer
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-2 space-y-2">
+                  <div className="text-xs text-[--muted]">Statut: {statusChip(a.status)}</div>
+                  <div className="text-xs text-[--muted]">
+                    Webhook URL: <code>{webhookDisplay}</code> (colle-la dans GHL)
+                  </div>
+                </div>
+              </div>
+
+              {/* ======= Mapping Drag & Drop ======= */}
+              <div className="card">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-medium">Mapping (glisser-déposer)</div>
+                  <button className="btn btn-primary" onClick={saveMapping}>
+                    Enregistrer
                   </button>
-                ))}
-              </div>
+                </div>
 
-              <div className="flex gap-2 w-full sm:w-80">
-                <input
-                  className="input flex-1"
-                  placeholder="Rechercher (nom, URL, id)…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Liste */}
-          <div className="card">
-            {!filtered.length ? (
-              <div className="text-sm text-[--muted] py-8 text-center">Aucune automation. Crée la première ci-dessus.</div>
-            ) : (
-              <div className="grid gap-3">
-                {filtered.map((a) => (
-                  <div key={a.id} className="rounded-xl border border-white/10 bg-white/5 p-3 group">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      {/* gauche */}
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {editingId === a.id ? (
-                            <>
-                              <input
-                                className="input h-7 px-2 py-1"
-                                value={editingName}
-                                onChange={(e)=>setEditingName(e.target.value)}
-                                onKeyDown={(e)=>{ if(e.key==='Enter') saveName(a.id); if(e.key==='Escape') setEditingId(null); }}
-                                autoFocus
-                              />
-                              <button className="btn btn-primary h-7 px-2" onClick={()=>saveName(a.id)} disabled={savingId===a.id}>OK</button>
-                              <button className="btn btn-ghost h-7 px-2" onClick={()=>setEditingId(null)}>Annuler</button>
-                            </>
-                          ) : (
-                            <>
-                              <a href={`/integrations/automatisations/${a.id}`} className="font-medium truncate hover:underline" title="Ouvrir le détail & mapping">
-                                {a.name}
-                              </a>
-                              <div className="shrink-0">{statusChip(a.status)}</div>
-                              <span className="text-2xs px-2 py-0.5 rounded bg-white/10">{totalCounts[a.id] ?? 0} évts</span>
-                            </>
-                          )}
-                        </div>
-
-                        <div className="text-[10px] text-[--muted] mt-1">
-                          {a.updatedAt ? `MAJ ${new Date(a.updatedAt).toLocaleString()}` :
-                           a.createdAt ? `Créée ${new Date(a.createdAt).toLocaleString()}` : null}
-                        </div>
-                      </div>
-
-                      {/* droite */}
-                      <div className="flex items-center gap-2">
-                        <div className="text-2xs px-2 py-0.5 rounded bg-white/10 truncate max-w-[52ch]">{a.webhookUrl || "—"}</div>
-
-                        {/* <-- utilisation de copyWebhook pour gérer le cas undefined */}
-                        <button
-                          className="btn btn-ghost h-7 px-2"
-                          title="Copier l’URL"
-                          onClick={() => copyWebhook(a)}
-                        >
-                          Copier
-                        </button>
-
-                        <div className="hidden md:flex rounded-lg overflow-hidden border border-white/10">
-                          {(["OFF","DRY_RUN","ON"] as Status[]).map(s => (
-                            <button
-                              key={s}
-                              className={`text-2xs px-2 py-1 ${a.status===s ? "bg-white/15" : "bg-transparent hover:bg-white/10"}`}
-                              onClick={()=>setStatusApi(a.id, s)}
-                              disabled={savingId===a.id}
-                              title={s==="ON" ? "Active" : s==="DRY_RUN" ? "Dry-run" : "Off"}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Source (payload) */}
+                  <div>
+                    <div className="label">Échantillon (dernier payload)</div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-3 max-h-[420px] overflow-auto">
+                      {Object.keys(lastPayload || {}).length ? (
+                        <ul className="space-y-1">
+                          {sampleEntries.map(({ path, value }) => (
+                            <li
+                              key={path}
+                              draggable
+                              onDragStart={() => onDragStartPath(path)}
+                              className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/15 cursor-grab flex items-center justify-between gap-2"
+                              title="Glisser sur une zone à droite"
                             >
-                              {s}
-                            </button>
+                              <span className="truncate">{path}</span>
+                              <span className="text-[10px] opacity-80 truncate max-w-[50%]">{String(value)}</span>
+                            </li>
                           ))}
+                        </ul>
+                      ) : (
+                        <div className="text-xs text-[--muted]">
+                          Aucune donnée échantillon. Envoie un test depuis GHL (automation en DRY-RUN).
                         </div>
-
-                        <div className="relative">
-                          <button
-                            className="btn btn-ghost h-7 px-2"
-                            aria-haspopup="menu"
-                            onClick={() => setOpenMenuId((v) => (v === a.id ? null : a.id))}
-                            title="Plus d’actions"
-                          >
-                            ⋯
-                          </button>
-                          {openMenuId === a.id && (
-                            <div className="absolute right-0 top-8 z-20 min-w-44 rounded-xl border border-white/10 bg-[rgba(16,22,33,.98)] shadow-xl p-1" role="menu" onMouseLeave={() => setOpenMenuId(null)}>
-                              <button className="menu-item" onClick={() => { setEditingId(a.id); setEditingName(a.name); setOpenMenuId(null); }}>Renommer</button>
-                              <button className="menu-item" onClick={() => { setStatusApi(a.id, "ON"); setOpenMenuId(null); }}>Activer</button>
-                              <button className="menu-item" onClick={() => { setStatusApi(a.id, "DRY_RUN"); setOpenMenuId(null); }}>Mode Dry-run</button>
-                              <button className="menu-item" onClick={() => { setStatusApi(a.id, "OFF"); setOpenMenuId(null); }}>Désactiver</button>
-                              <div className="h-px bg-white/10 my-1" />
-                              <button className="menu-item" onClick={() => { duplicate(a.id); setOpenMenuId(null); }}>Dupliquer</button>
-                              <button className="menu-item text-rose-300" onClick={() => { setOpenMenuId(null); remove(a.id); }}>Supprimer</button>
-                              <a className="menu-item" href={`/integrations/automatisations/${a.id}`} onClick={() => setOpenMenuId(null)}>Ouvrir le détail</a>
-                            </div>
-                          )}
-                        </div>
-
-                        <a className="btn btn-primary h-7 px-2" href={`/integrations/automatisations/${a.id}`}>Ouvrir</a>
-                      </div>
+                      )}
                     </div>
                   </div>
-                ))}
+
+                  {/* Targets (CRM) */}
+                  <div>
+                    <div className="label">Cible CRM (dépose ici)</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {targetFields.map((f) => {
+                        const curPath = a.mappingJson?.fields?.[f.key]?.from || "";
+                        const curVal = curPath ? getByPath(lastPayload, curPath) : undefined;
+                        return (
+                          <div key={f.key}>
+                            <div className="text-2xs mb-1 text-[--muted]">{f.label}</div>
+                            <div
+                              className="rounded-lg border border-dashed border-white/20 bg-white/5 px-2 py-2 min-h-10"
+                              onDragOver={onDragOverDropzone}
+                              onDrop={() => onDropToField(f.key)}
+                            >
+                              <div className="flex items-center gap-2">
+                                <input
+                                  className="bg-transparent outline-none text-xs flex-1"
+                                  placeholder="Dépose un path ou saisis-le (a.b.c)"
+                                  value={curPath}
+                                  onChange={(e) => setFieldFrom(f.key, e.target.value || null)}
+                                />
+                                {curPath && (
+                                  <button className="text-2xs opacity-60 hover:opacity-100" onClick={() => setFieldFrom(f.key, null)}>
+                                    ×
+                                  </button>
+                                )}
+                              </div>
+                              {curPath && (
+                                <div className="mt-1 text-[10px] text-[--muted] truncate">
+                                  Valeur actuelle: <span className="opacity-90">{String(curVal ?? "—")}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Stage Rules */}
+                    <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3">
+                      <div className="font-medium mb-2">Règles d’étape (pipeline)</div>
+
+                      <div className="flex gap-2 text-sm">
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="stageMode"
+                            checked={(a.mappingJson?.stage?.mode || "table") === "fixed"}
+                            onChange={() => setStageMode("fixed")}
+                          />
+                          <span>Fixed</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="stageMode"
+                            checked={(a.mappingJson?.stage?.mode || "table") === "table"}
+                            onChange={() => setStageMode("table")}
+                          />
+                          <span>Table</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="stageMode"
+                            checked={(a.mappingJson?.stage?.mode || "table") === "none"}
+                            onChange={() => setStageMode("none")}
+                          />
+                          <span>None</span>
+                        </label>
+                      </div>
+
+                      {(a.mappingJson?.stage?.mode || "table") === "fixed" && (
+                        <div className="mt-2">
+                          <div className="label">Étape fixe</div>
+                          <select
+                            className="input"
+                            value={a.mappingJson?.stage?.fixed || "LEAD_RECU"}
+                            onChange={(e) => setStageFixed(e.target.value as LeadStage)}
+                          >
+                            {stageOptions.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {(a.mappingJson?.stage?.mode || "table") === "table" && (
+                        <div className="mt-2 space-y-2">
+                          <div>
+                            <div className="label">Champ source (dépose un path)</div>
+                            <div
+                              className="rounded-lg border border-dashed border-white/20 bg-white/5 px-2 py-2 min-h-10"
+                              onDragOver={onDragOverDropzone}
+                              onDrop={() => dragPath && setStageTableFrom(dragPath)}
+                            >
+                              <input
+                                className="bg-transparent outline-none text-xs w-full"
+                                placeholder="ex: pipeline_stage"
+                                value={a.mappingJson?.stage?.table?.from || ""}
+                                onChange={(e) => setStageTableFrom(e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="label">Table de correspondance</div>
+                            <div className="space-y-2">
+                              {Object.entries(a.mappingJson?.stage?.table?.map || {}).map(([fromVal, stage]) => (
+                                <div key={fromVal} className="flex items-center gap-2">
+                                  <input className="input flex-1" value={fromVal} readOnly />
+                                  <select
+                                    className="input"
+                                    value={stage as string}
+                                    onChange={(e) => setStageTableMap(fromVal, e.target.value as LeadStage)}
+                                  >
+                                    {stageOptions.map((s) => (
+                                      <option key={s} value={s}>
+                                        {s}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              ))}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  className="input flex-1"
+                                  placeholder="Valeur source (ex: RV1 fait)"
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      const v = (e.currentTarget as HTMLInputElement).value.trim();
+                                      if (v) {
+                                        setStageTableMap(v, "LEAD_RECU");
+                                        (e.currentTarget as HTMLInputElement).value = "";
+                                      }
+                                    }
+                                  }}
+                                />
+                                <span className="text-xs text-[--muted]">Entrée ↵</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="label">Fallback</div>
+                            <select
+                              className="input"
+                              value={a.mappingJson?.stage?.table?.fallback || "LEAD_RECU"}
+                              onChange={(e) => setStageTableFallback(e.target.value as LeadStage)}
+                            >
+                              {stageOptions.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Merge strategy */}
+                    <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                      <div className="font-medium mb-2">Stratégie de fusion</div>
+                      <div className="flex flex-wrap items-center gap-4 text-sm">
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="mergeStrat"
+                            checked={(a.mappingJson?.merge?.strategy || "preserve") === "preserve"}
+                            onChange={() => setMergeStrategy("preserve")}
+                          />
+                          <span>Préserver l’existant</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="mergeStrat"
+                            checked={(a.mappingJson?.merge?.strategy || "preserve") === "overwriteMapped"}
+                            onChange={() => setMergeStrategy("overwriteMapped")}
+                          />
+                          <span>Écraser (champs mappés)</span>
+                        </label>
+
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(a.mappingJson?.merge?.skipNull ?? true)}
+                            onChange={(e) => setMergeSkipNull(e.target.checked)}
+                          />
+                          <span>Ignorer les valeurs vides/null</span>
+                        </label>
+                      </div>
+                      <div className="text-[11px] text-[--muted] mt-1">
+                        Note: <code>opportunityValue</code> et <code>tag</code> sont toujours mis à jour si mappés (forceOverwrite).
+                      </div>
+                    </div>
+
+                    {/* Assignation (auto) — NOUVEAU */}
+                    <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                      <div className="font-medium mb-2">Assignation (auto)</div>
+
+                      <div className="flex items-center gap-3 text-sm">
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(a.mappingJson?.assign?.roundRobin?.setter ?? true)}
+                            onChange={(e) => setAssignRoundRobinSetter(e.target.checked)}
+                          />
+                          <span>Round-robin sur SETTER si aucune règle ne matche</span>
+                        </label>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="label">Règles (évaluées dans l’ordre)</div>
+                        <div className="space-y-2">
+                          {(a.mappingJson?.assign?.rules || []).map((r: any, i: number) => (
+                            <div key={i} className="rounded-lg border border-white/10 p-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <select
+                                  className="input h-8"
+                                  value={r.role || "SETTER"}
+                                  onChange={(e) => updateAssignRule(i, { role: e.target.value })}
+                                  title="Rôle cible"
+                                >
+                                  <option value="SETTER">SETTER</option>
+                                  <option value="CLOSER">CLOSER</option>
+                                </select>
+
+                                <select
+                                  className="input h-8"
+                                  value={r.by || "email"}
+                                  onChange={(e) => updateAssignRule(i, { by: e.target.value })}
+                                  title="Type de règle"
+                                >
+                                  <option value="email">par email (from path)</option>
+                                  <option value="name">par nom (from path)</option>
+                                  <option value="static">statique (match → userId)</option>
+                                </select>
+
+                                {(r.by === "email" || r.by === "name" || r.by === "static") && (
+                                  <input
+                                    className="input h-8 w-56"
+                                    placeholder="Path source (ex: owner.email)"
+                                    value={r.from || ""}
+                                    onChange={(e) => updateAssignRule(i, { from: e.target.value })}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={() => {
+                                      if (dragPath) {
+                                        updateAssignRule(i, { from: dragPath });
+                                        setDragPath(null);
+                                      }
+                                    }}
+                                    title="Dépose un path depuis la colonne de gauche"
+                                  />
+                                )}
+
+                                {r.by === "static" && (
+                                  <>
+                                    <input
+                                      className="input h-8 w-44"
+                                      placeholder="match.equals / match.contains"
+                                      value={r.match?.equals || r.match?.contains || ""}
+                                      onChange={(e) => {
+                                        const v = e.target.value;
+                                        updateAssignRule(i, { match: v ? { equals: v } : {} });
+                                      }}
+                                      title="equals / contains / regex via JSON si besoin"
+                                    />
+                                    <input
+                                      className="input h-8 w-44"
+                                      placeholder="userId cible"
+                                      value={r.userId || ""}
+                                      onChange={(e) => updateAssignRule(i, { userId: e.target.value })}
+                                      title="l’ID du user en base"
+                                    />
+                                  </>
+                                )}
+
+                                <button className="btn btn-ghost h-8 px-2" onClick={() => removeAssignRule(i)}>
+                                  Supprimer
+                                </button>
+                              </div>
+
+                              {r.from && (
+                                <div className="text-[11px] text-[--muted] mt-1">
+                                  Valeur actuelle ({r.from}) :{" "}
+                                  <span className="opacity-90">
+                                    {String(getByPath(lastPayload, r.from) ?? "—")}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          <div>
+                            <button
+                              className="btn btn-ghost"
+                              onClick={() => pushAssignRule({ role: "SETTER", by: "email", from: "" })}
+                            >
+                              + Ajouter une règle
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {/* /Assignation (auto) */}
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
+
+              {/* Inbox des événements */}
+              <div className="card">
+                <div className="font-medium mb-2">Inbox des événements (30 derniers)</div>
+                <div className="space-y-2">
+                  {events.map((ev) => (
+                    <details key={ev.id} className="rounded-lg border border-white/10 p-3">
+                      <summary className="cursor-pointer">
+                        <span className="text-sm">
+                          #{ev.id.slice(-6)} • {new Date(ev.receivedAt).toLocaleString()} • {ev.status}
+                        </span>
+                        {ev.error && <span className="ml-2 text-rose-300">— {ev.error}</span>}
+                        {ev.result?.leadId && <span className="ml-2 text-emerald-300">→ lead {ev.result.leadId}</span>}
+                      </summary>
+                      <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <div className="label">Payload reçu</div>
+                          <pre className="text-xs bg-white/5 rounded p-2 overflow-auto">
+                            {JSON.stringify(ev.payload, null, 2)}
+                          </pre>
+                        </div>
+                        <div>
+                          <div className="label">Résultat</div>
+                          <pre className="text-xs bg-white/5 rounded p-2 overflow-auto">
+                            {JSON.stringify(ev.result || {}, null, 2)}
+                          </pre>
+                          <button
+                            className="btn btn-ghost mt-2"
+                            onClick={() => api.post(`/integrations/events/${ev.id}/replay`).then(load)}
+                          >
+                            Rejouer
+                          </button>
+                        </div>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+
+                {!events.length && (
+                  <div className="text-sm text-[--muted]">
+                    Aucun événement reçu. Laisse l’automation en <b>DRY-RUN</b>, envoie un test depuis GHL puis reviens
+                    mapper.
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
 
-      {toast.open && (
-        <div className="fixed bottom-5 right-5 z-50">
-          <div className={`rounded-xl border px-4 py-3 shadow-lg ${toast.ok ? "border-emerald-500/30 bg-emerald-500/15" : "border-rose-500/30 bg-rose-500/15"}`}>
-            <div className="text-sm">{toast.msg}</div>
+      {/* Modal de confirmation */}
+      {modal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="card max-w-sm w-full text-center">
+            <div className={`text-4xl mb-2 ${modal.ok ? "text-emerald-300" : "text-rose-300"}`}>{modal.ok ? "✅" : "❌"}</div>
+            <div className="text-lg font-semibold">{modal.ok ? "Enregistré" : "Échec"}</div>
+            <div className="text-sm text-[--muted] mt-1">{modal.message}</div>
+            <div className="mt-4">
+              <button className="btn btn-primary" onClick={() => setModal((m) => ({ ...m, open: false }))}>
+                OK
+              </button>
+            </div>
           </div>
         </div>
       )}
-
-      <style jsx global>{`
-        .menu-item { display:block; width:100%; text-align:left; font-size:12px; padding:8px 10px; border-radius:8px; }
-        .menu-item:hover { background: rgba(255,255,255,0.08); }
-      `}</style>
     </div>
   );
-  
 }
