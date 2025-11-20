@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
@@ -457,157 +458,422 @@ type FunnelProps = {
 };
 
 function Funnel({ data, onCardClick }: FunnelProps) {
-  const cards = [
+  type GroupId = "top" | "calls" | "rv0" | "rv1" | "rv2" | "won";
+
+  type Card = {
+    key: FunnelKey;
+    label: string;
+    value: number;
+    hint?: string;
+    group: GroupId;
+    numForRate?: number;
+    denForRate?: number;
+  };
+
+  const groups: {
+    id: GroupId;
+    title: string;
+    subtitle: string;
+    stepLabel: string;
+    tone:
+      | "indigo"
+      | "cyan"
+      | "amber"
+      | "violet"
+      | "rose"
+      | "emerald";
+  }[] = [
+    {
+      id: "top",
+      title: "Entrée de pipeline",
+      subtitle: "Tous les leads qui tombent dans le système.",
+      stepLabel: "Étape 1",
+      tone: "indigo",
+    },
+    {
+      id: "calls",
+      title: "Contact & qualification",
+      subtitle:
+        "Moment où le lead passe d’un simple contact à une vraie conversation.",
+      stepLabel: "Étape 2",
+      tone: "cyan",
+    },
+    {
+      id: "rv0",
+      title: "RV0 — Diagnostic",
+      subtitle: "RDV de découverte / cadrage avec le prospect.",
+      stepLabel: "Étape 3",
+      tone: "amber",
+    },
+    {
+      id: "rv1",
+      title: "RV1 — Closing",
+      subtitle: "RDV de vente principal (closing).",
+      stepLabel: "Étape 4",
+      tone: "violet",
+    },
+    {
+      id: "rv2",
+      title: "RV2 — Suivi / relance",
+      subtitle: "Deuxième RDV pour finir / sécuriser le deal.",
+      stepLabel: "Étape 5",
+      tone: "rose",
+    },
+    {
+      id: "won",
+      title: "Ventes gagnées (WON)",
+      subtitle: "Leads qui deviennent des clients payants.",
+      stepLabel: "Étape 6",
+      tone: "emerald",
+    },
+  ];
+
+  const cards: Card[] = [
+    // ------- ENTRÉE -------
     {
       key: "leads",
       label: "Leads reçus",
       value: data.leads,
       hint: "Contacts créés durant la période.",
+      group: "top",
     },
     {
       key: "callRequests",
       label: "Demandes d’appel",
       value: data.callRequests,
-      hint: "Intentions de prise de RDV.",
+      hint: "Prospects qui demandent un échange.",
+      group: "top",
+      numForRate: data.callRequests,
+      denForRate: data.leads,
     },
+
+    // ------- APPELS -------
     {
       key: "callsTotal",
       label: "Appels passés",
       value: data.callsTotal,
-      hint: "Tentatives de contact.",
+      hint: "Appels réellement effectués par les setters.",
+      group: "calls",
+      numForRate: data.callsTotal,
+      denForRate: data.callRequests,
     },
     {
       key: "callsAnswered",
       label: "Appels répondus",
       value: data.callsAnswered,
-      hint: "Prospects joints.",
+      hint: "Prospects joints au téléphone.",
+      group: "calls",
+      numForRate: data.callsAnswered,
+      denForRate: data.callsTotal,
     },
     {
       key: "setterNoShow",
       label: "No-show Setter",
       value: data.setterNoShow,
-      hint: "Appelés mais jamais joints.",
+      hint: "Appels jamais joints / abandonnés.",
+      group: "calls",
+      numForRate: data.setterNoShow,
+      denForRate: data.callsTotal,
     },
+
+    // ------- RV0 -------
     {
       key: "rv0Planned",
       label: "RV0 planifiés",
       value: data.rv0P,
       hint: "Premiers RDV programmés.",
+      group: "rv0",
+      numForRate: data.rv0P,
+      denForRate: data.callsAnswered,
     },
     {
       key: "rv0Honored",
       label: "RV0 honorés",
       value: data.rv0H,
-      hint: "Premiers RDV tenus.",
+      hint: "RV0 tenus avec le prospect.",
+      group: "rv0",
+      numForRate: data.rv0H,
+      denForRate: data.rv0P,
     },
     {
       key: "rv0NoShow",
       label: "RV0 no-show",
       value: data.rv0NS,
-      hint: "Absences au premier RDV.",
+      hint: "Prospects absents au RV0.",
+      group: "rv0",
+      numForRate: data.rv0NS,
+      denForRate: data.rv0P,
     },
-
     {
       key: "rv0Canceled",
       label: "RV0 annulés",
       value: data.rv0C,
-      hint: "Annulations du premier RDV.",
+      hint: "RV0 annulés avant de se tenir.",
+      group: "rv0",
+      numForRate: data.rv0C,
+      denForRate: data.rv0P,
     },
 
+    // ------- RV1 -------
     {
       key: "rv1Planned",
       label: "RV1 planifiés",
       value: data.rv1P,
       hint: "Closings programmés.",
+      group: "rv1",
+      numForRate: data.rv1P,
+      denForRate: data.rv0H,
     },
-
     {
       key: "rv1Honored",
       label: "RV1 honorés",
       value: data.rv1H,
-      hint: "Closings tenus.",
+      hint: "Closings réellement tenus.",
+      group: "rv1",
+      numForRate: data.rv1H,
+      denForRate: data.rv1P,
     },
     {
       key: "rv1NoShow",
       label: "RV1 no-show",
       value: data.rv1NS,
       hint: "Absences au closing.",
+      group: "rv1",
+      numForRate: data.rv1NS,
+      denForRate: data.rv1P,
     },
-
     {
       key: "rv1Canceled",
       label: "RV1 annulés",
       value: data.rv1C,
-      hint: "Annulations du closing.",
+      hint: "Closings annulés avant d’avoir lieu.",
+      group: "rv1",
+      numForRate: data.rv1C,
+      denForRate: data.rv1P,
     },
 
+    // ------- RV2 -------
     {
       key: "rv2Planned",
       label: "RV2 planifiés",
       value: data.rv2P,
-      hint: "Deuxièmes RDV.",
+      hint: "Deuxièmes RDV programmés.",
+      group: "rv2",
+      numForRate: data.rv2P,
+      denForRate: data.rv1H,
     },
     {
       key: "rv2Honored",
       label: "RV2 honorés",
       value: data.rv2H,
       hint: "Deuxièmes RDV tenus.",
+      group: "rv2",
+      numForRate: data.rv2H,
+      denForRate: data.rv2P,
     },
-
     {
       key: "rv2Canceled",
       label: "RV2 annulés",
       value: data.rv2C,
-      hint: "Annulations du second RDV.",
+      hint: "RV2 annulés avant d’avoir lieu.",
+      group: "rv2",
+      numForRate: data.rv2C,
+      denForRate: data.rv2P,
     },
 
+    // ------- VENTES -------
     {
       key: "wonCount",
       label: "Ventes (WON)",
       value: data.won,
-      hint: "Passages en client.",
+      hint: "Dossiers passés en client.",
+      group: "won",
+      numForRate: data.won,
+      denForRate: data.leads,
     },
+  ];
 
+  const ratePct = (num?: number, den?: number) => {
+    if (!den || den <= 0) return null;
+    const pct = Math.round(((num || 0) / den) * 100);
+    return isNaN(pct) ? null : pct;
+  };
 
-  ] as const;
+  const toneClasses = (
+    tone: (typeof groups)[number]["tone"]
+  ) => {
+    switch (tone) {
+      case "indigo":
+        return "border-indigo-400/40 hover:border-indigo-200/90 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,0.35),rgba(15,23,42,0.98))]";
+      case "cyan":
+        return "border-cyan-400/40 hover:border-cyan-200/90 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.30),rgba(15,23,42,0.98))]";
+      case "amber":
+        return "border-amber-400/40 hover:border-amber-200/90 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.30),rgba(15,23,42,0.98))]";
+      case "violet":
+        return "border-violet-400/40 hover:border-violet-200/90 bg-[radial-gradient(circle_at_top,_rgba(167,139,250,0.32),rgba(15,23,42,0.98))]";
+      case "rose":
+        return "border-rose-400/40 hover:border-rose-200/90 bg-[radial-gradient(circle_at_top,_rgba(244,114,182,0.30),rgba(15,23,42,0.98))]";
+      case "emerald":
+      default:
+        return "border-emerald-400/40 hover:border-emerald-200/90 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.30),rgba(15,23,42,0.98))]";
+    }
+  };
 
-  const rate = (a: number, b: number) =>
-    b ? `${Math.round((a / b) * 100)}%` : "—";
+  const grouped = groups
+    .map((g) => ({
+      ...g,
+      items: cards.filter((c) => c.group === g.id),
+    }))
+    .filter((g) => g.items.length > 0);
 
   return (
-    <div className="rounded-2xl border border-white/10 p-4 bg-[rgba(12,17,26,.6)]">
-      <div className="mb-3 font-medium">Funnel opérationnel</div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-7 xl:grid-cols-14 gap-2">
-        {cards.map((c) => (
-          <button
-            key={c.key}
-            className="text-left rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-            title={c.hint}
-            onClick={() => onCardClick(c.key)}
+    <div className="space-y-4">
+      {/* Timeline horizontale du funnel (au-dessus, très lisible) */}
+      <div className="hidden lg:flex items-center justify-between gap-3 text-[11px] text-[--muted]">
+        {grouped.map((g, index) => (
+          <div
+            key={g.id}
+            className="flex-1 flex flex-col items-center gap-1"
           >
-            <div className="text-[10px] uppercase tracking-wide text-[--muted]">
-              {c.label}
+            <div className="flex items-center gap-2">
+              <div className="h-px w-6 bg-gradient-to-r from-white/0 via-white/40 to-white/0" />
+              <div className="rounded-full border border-white/15 bg-black/40 px-3 py-0.5">
+                <span className="text-[9px] uppercase tracking-wide opacity-70">
+                  {g.stepLabel}
+                </span>
+              </div>
+              <div className="h-px w-6 bg-gradient-to-r from-white/0 via-white/40 to-white/0" />
             </div>
-            <div className="mt-1 text-xl font-semibold">
-              {fmtInt(c.value)}
+            <div className="text-[11px] font-medium text-white/85">
+              {g.title}
             </div>
-          </button>
+          </div>
         ))}
       </div>
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs text-[--muted]">
-        <div>
-          Taux de contact :{" "}
-          <b>{rate(data.callsAnswered, data.callsTotal)}</b>
-        </div>
-        <div>
-          Présence RV1 : <b>{rate(data.rv1H, data.rv1P)}</b>
-        </div>
-        <div>
-          No-show RV1 : <b>{rate(data.rv1NS, data.rv1P)}</b>
-        </div>
-        <div>
-          Conversion finale : <b>{rate(data.won, data.leads)}</b>
-        </div>
+
+      {/* Groupes de tuiles cliquables */}
+      <div className="space-y-3">
+        {grouped.map((g) => (
+          <div
+            key={g.id}
+            className="rounded-2xl border border-white/5 bg-[rgba(8,12,20,.9)] px-3 py-2"
+          >
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-[--muted]">
+                  {g.stepLabel} · {g.title}
+                </div>
+                <div className="text-[11px] text-[--muted]">
+                  {g.subtitle}
+                </div>
+              </div>
+              <div className="hidden sm:block text-[10px] text-[--muted]">
+                Clique une tuile pour voir les leads
+                correspondants.
+              </div>
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {g.items.map((c) => {
+                const pct = ratePct(
+                  c.numForRate,
+                  c.denForRate
+                );
+                return (
+                  <motion.button
+                    key={c.key}
+                    type="button"
+                    whileHover={{ y: -2, scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => onCardClick(c.key)}
+                    className={[
+                      "group relative min-w-[190px] max-w-xs flex-1 rounded-2xl px-3 py-2.5 text-left",
+                      "shadow-[0_18px_40px_rgba(0,0,0,0.9)]",
+                      "transition-all duration-200",
+                      toneClasses(g.tone),
+                    ].join(" ")}
+                  >
+                    {/* Label */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[10px] uppercase tracking-wide text-white/70">
+                        {c.label}
+                      </div>
+                      {pct !== null && (
+                        <span className="text-[9px] rounded-full border border-white/20 bg-black/40 px-2 py-0.5 text-[--muted]">
+                          vs étape précédente
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Zone centrale : % EN GROS + compteur */}
+                    <div className="mt-1 flex items-center gap-3">
+                      <div className="flex flex-col">
+                        <div className="flex items-baseline gap-1">
+                          {pct !== null ? (
+                            <>
+                              <span className="text-2xl font-semibold">
+                                {pct}
+                              </span>
+                              <span className="text-sm font-semibold">
+                                %
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-2xl font-semibold">
+                              {fmtInt(c.value)}
+                            </span>
+                          )}
+                        </div>
+                        {pct !== null && (
+                          <div className="text-[11px] text-[--muted]">
+                            {fmtInt(c.numForRate || 0)} /{" "}
+                            {fmtInt(c.denForRate || 0)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Mini barre de progression à droite */}
+                      {pct !== null && (
+                        <div className="flex-1">
+                          <div className="h-1.5 w-full rounded-full bg-black/40 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-emerald-300 via-cyan-300 to-emerald-400"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  pct
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ligne détail volume */}
+                    {pct === null && (
+                      <div className="mt-1 text-[11px] text-[--muted]">
+                        Volume brut :{" "}
+                        <b>{fmtInt(c.value)}</b>
+                      </div>
+                    )}
+
+                    {c.hint && (
+                      <div className="mt-1 text-[11px] leading-snug text-[--muted]">
+                        {c.hint}
+                      </div>
+                    )}
+
+                    {/* Effet hover subtil */}
+                    <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="absolute inset-x-0 -bottom-6 h-16 bg-gradient-to-t from-black/60 via-black/30 to-transparent" />
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -3668,6 +3934,5 @@ async function fetchStageSeriesAny(stage: string, params: any) {
     </div>
   );
 }
-
 
 
