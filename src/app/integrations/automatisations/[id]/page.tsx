@@ -52,6 +52,7 @@ const STAGE_DEFAULTS: string[] = [
 
   "RV2_PLANNED",
   "RV2_HONORED",
+  "RV2_NO_SHOW",
   "RV2_POSTPONED",
   "RV2_CANCELED",
 
@@ -82,6 +83,7 @@ const LEGACY_TO_NEW: Record<string, string> = {
 
   RV2_PLANIFIE: "RV2_PLANNED",
   RV2_HONORE:  "RV2_HONORED",
+  RV2_NO_SHOW: "RV2_NO_SHOW",
   RV2_CANCELED: 'RV2_CANCELED',
 
   WON: "WON",
