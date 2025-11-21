@@ -8,6 +8,7 @@ import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 import { currentMonthRange } from "@/lib/date";
 import { motion, AnimatePresence } from "framer-motion";
 // en haut du fichier
+
 /* ================== Types alignés backend ================== */
 type LeadStage =
   | "LEADS_RECEIVED"
@@ -1605,4 +1606,3 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
     </div>
   );
 }
-
