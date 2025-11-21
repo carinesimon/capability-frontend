@@ -90,6 +90,8 @@ type SetterRow = {
   rv1HonoredOnHisLeads?: number;   // ✅ nouveau
   rv1CanceledOnHisLeads?: number;  // ✅ nouveau
   rv1DoneOnHisLeads?:number;
+  rv1NoShowOnHisLeads?: number;          // ✅ pour la colonne "RV1 no-show"
+
   settingRate?:number;
   // Déjà présents dans ton code (on les garde)
   rv0Count?: number;
@@ -109,6 +111,9 @@ type SetterRow = {
   // Dérivés côté front
   qualificationRate?: number | null; // rv1HonoredOnHisLeads / leadsReceived
   rv1CancelRateOnHisLeads?: number | null; // rv1CanceledOnHisLeads / rv1PlannedOnHisLeads
+  rv1NoShowRate?: number | null;            // ✅ pour "% no-show RV1"
+  rv1CancelRate?: number | null;             // ✅ alias pour le front (évite l’erreur TS)
+
 };
 
 type CloserRow = {
@@ -119,14 +124,19 @@ type CloserRow = {
   // RV1
   rv1Planned: number;
   rv1Honored: number;
-  rv1Canceled?: number;           // ✅ nouveau
+  rv1Canceled?: number;    
+  rv1NoShow?: number;                // ✅ nouveau
+       // ✅ nouveau
   rv1CancelRate?: number | null;  // ✅ nouveau
+  rv1NoShowRate?: number | null;     // ✅ (utile si tu veux l'afficher plus tard)
 
   // RV2
   rv2Planned: number;
   rv2Honored?: number;
-  rv2Canceled?: number;           // ✅ nouveau
+  rv2Canceled?: number;   
+  rv2NoShow?: number;            // ✅ important
   rv2CancelRate?: number | null;  // ✅ nouveau
+  rv2NoShowRate?: number | null;     // ✅
 
   // Business
   salesClosed: number;
@@ -1323,6 +1333,7 @@ const neutralKpiCell =
   
   // Classements (setters / closers)
   // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
+// Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
 useEffect(() => {
   if (!authChecked || authError) return;
   let cancelled = false;
@@ -1342,22 +1353,46 @@ useEffect(() => {
       const settersRaw = sRes.data || [];
       const closersRaw = cRes.data || [];
 
-      // Dérivés
-      const settersDer = settersRaw.map(s => ({
+      // Dérivés (on calcule les taux ici)
+      const settersDer = settersRaw.map((s) => {
+      const qualificationRate =
+        (s.rv1PlannedOnHisLeads || 0) /
+        Math.max(1, s.leadsReceived || 0);
+
+      const rv1CancelRate =
+        (s.rv1CanceledOnHisLeads || 0) /
+        Math.max(1, s.rv1PlannedOnHisLeads || 0);
+
+      const rv1NoShowRate =
+        (s.rv1NoShowOnHisLeads || 0) /
+        Math.max(1, s.rv1PlannedOnHisLeads || 0);
+
+      return {
         ...s,
-        qualificationRate:
-          (s.rv1HonoredOnHisLeads || 0) / Math.max(1, s.leadsReceived || 0),
-        rv1CancelRateOnHisLeads:
-          (s.rv1CanceledOnHisLeads || 0) / Math.max(1, s.rv1PlannedOnHisLeads || 0),
-      }));
-      const closersDer = closersRaw.map(c => ({
+        qualificationRate,
+        rv1CancelRateOnHisLeads: rv1CancelRate,
+        rv1CancelRate,        // ✅ alias pour usage front
+        rv1NoShowRate,
+      };
+    });
+
+      const closersDer = closersRaw.map((c) => ({
         ...c,
         closingRate:
-          (c.salesClosed || 0) / Math.max(1, c.rv1Honored || 0),
+          (c.salesClosed || 0) /
+          Math.max(1, c.rv1Honored || 0),
         rv1CancelRate:
-          (c.rv1Canceled || 0) / Math.max(1, c.rv1Planned || 0),
+          (c.rv1Canceled || 0) /
+          Math.max(1, c.rv1Planned || 0),
         rv2CancelRate:
-          (c.rv2Canceled || 0) / Math.max(1, c.rv2Planned || 0),
+          (c.rv2Canceled || 0) /
+          Math.max(1, c.rv2Planned || 0),
+        rv1NoShowRate:
+          (c.rv1NoShow || 0) /
+          Math.max(1, c.rv1Planned || 0),
+        rv2NoShowRate:
+          (c.rv2NoShow || 0) /
+          Math.max(1, c.rv2Planned || 0),
       }));
 
       setSetters(settersDer as any);
@@ -1366,7 +1401,11 @@ useEffect(() => {
     } catch (e: any) {
       // 404 -> fallback vers anciens endpoints
       if (e?.response?.status !== 404) {
-        if (!cancelled) setErr(e?.response?.data?.message || "Erreur de chargement (spotlight)");
+        if (!cancelled)
+          setErr(
+            e?.response?.data?.message ||
+              "Erreur de chargement (spotlight)"
+          );
         return;
       }
     }
@@ -1379,85 +1418,134 @@ useEffect(() => {
       ]);
       if (cancelled) return;
 
-      const settersFallback: SetterRow[] = (sRes2.data || []).map(s => {
-        const leadsReceived = Number(s.leadsReceived || 0);
-        // On mappe au mieux depuis ton schéma existant
-        const rv1HonoredOnHisLeads = Number(s.rv1FromHisLeads || 0);
-        const rv1PlannedOnHisLeads = Number(s.rv1PlannedOnHisLeads || s.rv1FromHisLeads || 0);
-        const rv1CanceledOnHisLeads = Number(s.rv1CanceledOnHisLeads || 0);
+      const settersFallback: SetterRow[] = (sRes2.data || []).map(
+        (s) => {
+          const leadsReceived = Number(s.leadsReceived || 0);
 
-        return {
-          userId: s.userId,
-          name: s.name,
-          email: s.email,
-          leadsReceived,
-          rv0Count: s.rv0Count ?? 0,
-          ttfcAvgMinutes: s.ttfcAvgMinutes ?? null,
+          const rv1HonoredOnHisLeads = Number(
+            s.rv1FromHisLeads || 0
+          );
+          const rv1PlannedOnHisLeads = Number(
+            s.rv1PlannedOnHisLeads || s.rv1FromHisLeads || 0
+          );
+          const rv1CanceledOnHisLeads = Number(
+            s.rv1CanceledOnHisLeads || 0
+          );
+          const rv1NoShowOnHisLeads = Number(
+            s.rv1NoShowOnHisLeads || 0
+          );
+          const rv1CancelRate = rv1PlannedOnHisLeads
+          ? rv1CanceledOnHisLeads / rv1PlannedOnHisLeads
+          : null;
 
-          rv1PlannedOnHisLeads,
-          rv1HonoredOnHisLeads,
-          rv1CanceledOnHisLeads,
+        const rv1NoShowRate = rv1PlannedOnHisLeads
+          ? rv1NoShowOnHisLeads / rv1PlannedOnHisLeads
+          : null;
 
-          salesFromHisLeads: Number(s.salesFromHisLeads || 0),
-          revenueFromHisLeads: Number(s.revenueFromHisLeads || 0),
+          return {
+            userId: s.userId,
+            name: s.name,
+            email: s.email,
 
-          qualificationRate: leadsReceived ? rv1HonoredOnHisLeads / leadsReceived : 0,
-          rv1CancelRateOnHisLeads: rv1PlannedOnHisLeads
-            ? rv1CanceledOnHisLeads / rv1PlannedOnHisLeads
-            : null,
+            leadsReceived,
+            rv0Count: s.rv0Count ?? 0,
+            ttfcAvgMinutes: s.ttfcAvgMinutes ?? null,
 
-          spendShare: s.spendShare ?? null,
-          cpl: s.cpl ?? null,
-          cpRv0: s.cpRv0 ?? null,
-          cpRv1: s.cpRv1 ?? null,
-          roas: s.roas ?? null,
-        };
-      });
+            rv1PlannedOnHisLeads,
+            rv1HonoredOnHisLeads,
+            rv1CanceledOnHisLeads,
+            rv1NoShowOnHisLeads,
 
-      const closersFallback: CloserRow[] = (cRes2.data || []).map(c => {
-        const rv1Planned = Number(c.rv1Planned || 0);
-        const rv1Honored = Number(c.rv1Honored || 0);
-        const rv1Canceled = Number(c.rv1Canceled || 0);
+            salesFromHisLeads: Number(s.salesFromHisLeads || 0),
+            revenueFromHisLeads: Number(s.revenueFromHisLeads || 0),
 
-        const rv2Planned = Number(c.rv2Planned || 0);
-        const rv2Honored = Number(c.rv2Honored || 0);
-        const rv2Canceled = Number(c.rv2Canceled || 0);
+            qualificationRate: leadsReceived
+              ? rv1PlannedOnHisLeads / leadsReceived
+              : 0,
+            rv1CancelRateOnHisLeads: rv1CancelRate,
+            rv1CancelRate,         // ✅ alias
+            rv1NoShowRate,
 
-        const salesClosed = Number(c.salesClosed || 0);
-        const revenueTotal = Number(c.revenueTotal || 0);
+            spendShare: s.spendShare ?? null,
+            cpl: s.cpl ?? null,
+            cpRv0: s.cpRv0 ?? null,
+            cpRv1: s.cpRv1 ?? null,
+            roas: s.roas ?? null,
+          };
+        }
+      );
 
-        return {
-          userId: c.userId,
-          name: c.name,
-          email: c.email,
-          rv1Planned,
-          rv1Honored,
-          rv1Canceled,
-          rv1CancelRate: rv1Planned ? rv1Canceled / rv1Planned : null,
-          rv2Planned,
-          rv2Honored,
-          rv2Canceled,
-          rv2CancelRate: rv2Planned ? rv2Canceled / rv2Planned : null,
-          salesClosed,
-          revenueTotal,
-          roasPlanned: c.roasPlanned ?? null,
-          roasHonored: c.roasHonored ?? null,
-          closingRate: rv1Honored ? salesClosed / rv1Honored : 0,
-        };
-      });
+      const closersFallback: CloserRow[] = (cRes2.data || []).map(
+        (c) => {
+          const rv1Planned = Number(c.rv1Planned || 0);
+          const rv1Honored = Number(c.rv1Honored || 0);
+          const rv1Canceled = Number(c.rv1Canceled || 0);
+          const rv1NoShow = Number(c.rv1NoShow || 0);
+
+          const rv2Planned = Number(c.rv2Planned || 0);
+          const rv2Honored = Number(c.rv2Honored || 0);
+          const rv2Canceled = Number(c.rv2Canceled || 0);
+          const rv2NoShow = Number(c.rv2NoShow || 0);
+
+          const salesClosed = Number(c.salesClosed || 0);
+          const revenueTotal = Number(c.revenueTotal || 0);
+
+          return {
+            userId: c.userId,
+            name: c.name,
+            email: c.email,
+
+            rv1Planned,
+            rv1Honored,
+            rv1Canceled,
+            rv1NoShow,
+            rv1CancelRate: rv1Planned
+              ? rv1Canceled / rv1Planned
+              : null,
+            rv1NoShowRate: rv1Planned
+              ? rv1NoShow / rv1Planned
+              : null,
+
+            rv2Planned,
+            rv2Honored,
+            rv2Canceled,
+            rv2NoShow,
+            rv2CancelRate: rv2Planned
+              ? rv2Canceled / rv2Planned
+              : null,
+            rv2NoShowRate: rv2Planned
+              ? rv2NoShow / rv2Planned
+              : null,
+
+            salesClosed,
+            revenueTotal,
+            roasPlanned: c.roasPlanned ?? null,
+            roasHonored: c.roasHonored ?? null,
+            closingRate: rv1Honored
+              ? salesClosed / rv1Honored
+              : 0,
+          };
+        }
+      );
 
       setSetters(settersFallback);
       setClosers(closersFallback);
     } catch (e: any) {
       if (!cancelled) {
-        setErr(e?.response?.data?.message || "Erreur de chargement (classements)");
+        setErr(
+          e?.response?.data?.message ||
+            "Erreur de chargement (classements)"
+        );
       }
     }
   }
 
   loadSpotlight();
-  return () => { cancelled = true; };
+  return () => {
+    cancelled = true;
+  };
 }, [authChecked, authError, fromISO, toISO, tz]);
+
 
  // (NOUVEAU) Annulés par jour via historisation (StageEvent)
 type CanceledDailyRow = {
@@ -3507,252 +3595,271 @@ async function fetchStageSeriesAny(stage: string, params: any) {
             </div>
 
            {/* Spotlight tables */}
-<div className="mt-6 grid grid-cols-1 gap-5">
-  {/* Closers */}
-  <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,.22),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
-    <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-      <div>
-        <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
-          👥 Spotlight Closers
-        </div>
-        <div className="text-xs text-[--muted] mt-0.5">
-          Top 8 closers · vue synthétique : volume · annulation · closing
-        </div>
-      </div>
-      <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
-        <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> KPI fort
-        <span className="inline-flex h-2 w-2 rounded-full bg-amber-400/70" /> à surveiller
-        <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> critique
-      </div>
-    </div>
-
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[1080px]">
-        <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
-          <tr>
-            <th className="py-2.5 px-3 font-medium">Closer</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV1 honorés</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
-            <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV2 planifiés</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV2 annulés</th>
-            <th className="py-2.5 px-3 font-medium text-right">% annulation RV2</th>
-            <th className="py-2.5 px-3 font-medium text-right">Ventes</th>
-            <th className="py-2.5 px-3 font-medium text-right">CA</th>
-            <th className="py-2.5 px-3 font-medium text-right">Taux closing</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedClosers.slice(0, 8).map((c, i) => (
-            <tr
-              key={c.userId}
-              className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
-            >
-              {/* Closer + rang */}
-              <td className="py-2.5 px-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
-                    {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
+          <div className="mt-6 grid grid-cols-1 gap-5">
+            {/* Closers */}
+            <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,.22),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
+                    👥 Spotlight Closers
                   </div>
-                  <div className="min-w-0">
-                    <div className="font-medium truncate text-[13px]">
-                      {c.name || "—"}
-                    </div>
-                    <div className="text-[10px] text-[--muted] truncate">
-                      {c.email}
-                    </div>
+                  <div className="text-xs text-[--muted] mt-0.5">
+                    Top 8 closers · vue synthétique : volume · no-show · annulation · closing
                   </div>
                 </div>
-              </td>
-
-              {/* Volumes RV1 / RV2 & ventes */}
-              <td className={neutralKpiCell}>{c.rv1Planned ?? 0}</td>
-              <td className={neutralKpiCell}>{c.rv1Honored ?? 0}</td>
-              <td className={neutralKpiCell}>{c.rv1Canceled ?? 0}</td>
-
-              {/* % annulation RV1 */}
-              <td className="py-2.5 px-3">
-                <div className="flex justify-end">
-                  <span className={cancelRateBadgeClass(c.rv1CancelRate)}>
-                    {c.rv1CancelRate == null
-                      ? "—"
-                      : `${Math.round(c.rv1CancelRate * 100)}%`}
-                  </span>
+                <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> KPI fort
+                  <span className="inline-flex h-2 w-2 rounded-full bg-amber-400/70" /> à surveiller
+                  <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> critique
                 </div>
-              </td>
+              </div>
 
-              <td className={neutralKpiCell}>{c.rv2Planned ?? 0}</td>
-              <td className={neutralKpiCell}>{c.rv2Canceled ?? 0}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[1200px]">
+                  <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3 font-medium">Closer</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 honorés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV2 planifiés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV2 annulés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV2 no-show</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% annulation RV2</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Ventes</th>
+                      <th className="py-2.5 px-3 font-medium text-right">CA</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Taux closing</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedClosers.slice(0, 8).map((c, i) => (
+                      <tr
+                        key={c.userId}
+                        className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
+                      >
+                        {/* Closer + rang */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
+                              {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-medium truncate text-[13px]">
+                                {c.name || "—"}
+                              </div>
+                              <div className="text-[10px] text-[--muted] truncate">
+                                {c.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
 
-              {/* % annulation RV2 */}
-              <td className="py-2.5 px-3">
-                <div className="flex justify-end">
-                  <span className={cancelRateBadgeClass(c.rv2CancelRate)}>
-                    {c.rv2CancelRate == null
-                      ? "—"
-                      : `${Math.round(c.rv2CancelRate * 100)}%`}
-                  </span>
-                </div>
-              </td>
+                        {/* Volumes RV1 / RV2 & ventes */}
+                        <td className={neutralKpiCell}>{c.rv1Planned ?? 0}</td>
+                        <td className={neutralKpiCell}>{c.rv1Honored ?? 0}</td>
+                        <td className={neutralKpiCell}>{c.rv1Canceled ?? 0}</td>
+                        <td className={neutralKpiCell}>{c.rv1NoShow ?? 0}</td>
 
-              {/* Ventes */}
-              <td className={neutralKpiCell}>{c.salesClosed ?? 0}</td>
+                        {/* % annulation RV1 */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            <span className={cancelRateBadgeClass(c.rv1CancelRate)}>
+                              {c.rv1CancelRate == null
+                                ? "—"
+                                : `${Math.round((c.rv1CancelRate || 0) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
 
-              {/* CA */}
-              <td className={neutralKpiCell}>
-                {(c.revenueTotal || 0).toLocaleString("fr-FR")} €
-              </td>
+                        <td className={neutralKpiCell}>{c.rv2Planned ?? 0}</td>
+                        <td className={neutralKpiCell}>{c.rv2Canceled ?? 0}</td>
+                        <td className={neutralKpiCell}>{c.rv2NoShow ?? 0}</td>
 
-              {/* Taux de closing */}
-              <td className="py-2.5 px-3">
-                <div className="flex justify-end">
-                  <span className={positiveRateBadgeClass(c.closingRate)}>
-                    {c.closingRate == null
-                      ? "—"
-                      : `${Math.round((c.closingRate || 0) * 100)}%`}
-                  </span>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {!sortedClosers.length && (
-            <tr>
-              <td className="py-6 px-3 text-[--muted] text-sm" colSpan={11}>
-                Aucune donnée sur la période sélectionnée.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  </div>
+                        {/* % annulation RV2 */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            <span className={cancelRateBadgeClass(c.rv2CancelRate)}>
+                              {c.rv2CancelRate == null
+                                ? "—"
+                                : `${Math.round((c.rv2CancelRate || 0) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
 
-  {/* Setters */}
-  <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,.18),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
-    <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-      <div>
-        <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
-          ☎️ Spotlight Setters
-        </div>
-        <div className="text-xs text-[--muted] mt-0.5">
-          Vue pipeline : leads → RV1 → ventes · vitesse & qualité de setting
-        </div>
-      </div>
-      <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
-        <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> TTFC bas
-        <span className="inline-flex h-2 w-2 rounded-full bg-sky-400/70" /> bon setting
-        <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> annulation forte
-      </div>
-    </div>
+                        {/* Ventes */}
+                        <td className={neutralKpiCell}>{c.salesClosed ?? 0}</td>
 
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[1200px]">
-        <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
-          <tr>
-            <th className="py-2.5 px-3 font-medium">Setter</th>
-            <th className="py-2.5 px-3 font-medium text-right">Leads reçus</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV1 honorés</th>
-            <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
-            <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
-            <th className="py-2.5 px-3 font-medium text-right">Ventes (ses leads)</th>
-            <th className="py-2.5 px-3 font-medium text-right">CA (ses leads)</th>
-            <th className="py-2.5 px-3 font-medium text-right">TTFC (min)</th>
-            <th className="py-2.5 px-3 font-medium text-right">Taux de setting</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedSetters.slice(0, 8).map((s, i) => (
-            <tr
-              key={s.userId}
-              className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
-            >
-              {/* Setter + rang */}
-              <td className="py-2.5 px-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
-                    {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
+                        {/* CA */}
+                        <td className={neutralKpiCell}>
+                          {(c.revenueTotal || 0).toLocaleString("fr-FR")} €
+                        </td>
+
+                        {/* Taux de closing */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            <span className={positiveRateBadgeClass(c.closingRate)}>
+                              {c.closingRate == null
+                                ? "—"
+                                : `${Math.round((c.closingRate || 0) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {!sortedClosers.length && (
+                      <tr>
+                        <td className="py-6 px-3 text-[--muted] text-sm" colSpan={13}>
+                          Aucune donnée sur la période sélectionnée.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Setters */}
+            <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,.18),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
+                    ☎️ Spotlight Setters
                   </div>
-                  <div className="min-w-0">
-                    <div className="font-medium truncate text-[13px]">
-                      {s.name || "—"}
-                    </div>
-                    <div className="text-[10px] text-[--muted] truncate">
-                      {s.email}
-                    </div>
+                  <div className="text-xs text-[--muted] mt-0.5">
+                    Vue pipeline : leads → RV1 → ventes · vitesse, no-show & qualité de setting
                   </div>
                 </div>
-              </td>
-
-              {/* Volumes */}
-              <td className={neutralKpiCell}>{s.leadsReceived ?? 0}</td>
-              <td className={neutralKpiCell}>{s.rv1PlannedOnHisLeads ?? 0}</td>
-              <td className={neutralKpiCell}>{s.rv1DoneOnHisLeads ?? 0}</td>
-              <td className={neutralKpiCell}>{s.rv1CanceledOnHisLeads ?? 0}</td>
-
-              {/* % annulation RV1 */}
-              <td className="py-2.5 px-3">
-                <div className="flex justify-end">
-                  <span className={cancelRateBadgeClass(s.rv1CancelRateOnHisLeads)}>
-                    {s.rv1CancelRateOnHisLeads == null
-                      ? "—"
-                      : `${Math.round(s.rv1CancelRateOnHisLeads * 100)}%`}
-                  </span>
+                <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> TTFC bas
+                  <span className="inline-flex h-2 w-2 rounded-full bg-sky-400/70" /> bon setting
+                  <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> annulation / no-show forts
                 </div>
-              </td>
+              </div>
 
-              {/* Ventes & CA depuis ses leads */}
-              <td className={neutralKpiCell}>{s.salesFromHisLeads ?? 0}</td>
-              <td className={neutralKpiCell}>
-                {(s.revenueFromHisLeads || 0).toLocaleString("fr-FR")} €
-              </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[1280px]">
+                  <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3 font-medium">Setter</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Leads reçus</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 honorés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% no-show RV1</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Ventes (ses leads)</th>
+                      <th className="py-2.5 px-3 font-medium text-right">CA (ses leads)</th>
+                      <th className="py-2.5 px-3 font-medium text-right">TTFC (min)</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Taux de setting</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedSetters.slice(0, 8).map((s, i) => (
+                      <tr
+                        key={s.userId}
+                        className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
+                      >
+                        {/* Setter + rang */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
+                              {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-medium truncate text-[13px]">
+                                {s.name || "—"}
+                              </div>
+                              <div className="text-[10px] text-[--muted] truncate">
+                                {s.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
 
-              {/* TTFC : plus c’est bas, mieux c’est */}
-              <td className="py-2.5 px-3">
-                <div className="flex justify-end">
-                  {s.ttfcAvgMinutes == null ? (
-                    <span className="text-[11px] text-[--muted]">—</span>
-                  ) : (
-                    <span
-                      className={
-                        s.ttfcAvgMinutes <= 15
-                          ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-500/40"
-                          : s.ttfcAvgMinutes <= 45
-                          ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-amber-500/20 text-amber-100 ring-1 ring-amber-500/40"
-                          : "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-red-500/20 text-red-100 ring-1 ring-red-500/40"
-                      }
-                    >
-                      {s.ttfcAvgMinutes} min
-                    </span>
-                  )}
-                </div>
-              </td>
+                        {/* Volumes */}
+                        <td className={neutralKpiCell}>{s.leadsReceived ?? 0}</td>
+                        <td className={neutralKpiCell}>{s.rv1PlannedOnHisLeads ?? 0}</td>
+                        <td className={neutralKpiCell}>{s.rv1DoneOnHisLeads ?? 0}</td>
+                        <td className={neutralKpiCell}>{s.rv1CanceledOnHisLeads ?? 0}</td>
+                        <td className={neutralKpiCell}>{s.rv1NoShowOnHisLeads ?? 0}</td>
 
-              {/* Taux de setting */}
-              <td className="py-2.5 px-3">
-                <div className="flex justify-end">
-                  <span className={positiveRateBadgeClass(s.settingRate)}>
-                    {s.settingRate == null
-                      ? "—"
-                      : `${Math.round((s.settingRate || 0) * 100)}%`}
-                  </span>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {!sortedSetters.length && (
-            <tr>
-              <td className="py-6 px-3 text-[--muted] text-sm" colSpan={10}>
-                Aucune donnée setter sur la période sélectionnée.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
+                        {/* % annulation RV1 */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            <span className={cancelRateBadgeClass(s.rv1CancelRateOnHisLeads ?? s.rv1CancelRate)}>
+                              {s.rv1CancelRateOnHisLeads == null && s.rv1CancelRate == null
+                                ? "—"
+                                : `${Math.round(((s.rv1CancelRateOnHisLeads ?? s.rv1CancelRate) || 0) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* % no-show RV1 */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            <span className={cancelRateBadgeClass(s.rv1NoShowRate)}>
+                              {s.rv1NoShowRate == null
+                                ? "—"
+                                : `${Math.round((s.rv1NoShowRate || 0) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Ventes & CA depuis ses leads */}
+                        <td className={neutralKpiCell}>{s.salesFromHisLeads ?? 0}</td>
+                        <td className={neutralKpiCell}>
+                          {(s.revenueFromHisLeads || 0).toLocaleString("fr-FR")} €
+                        </td>
+
+                        {/* TTFC : plus c’est bas, mieux c’est */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            {s.ttfcAvgMinutes == null ? (
+                              <span className="text-[11px] text-[--muted]">—</span>
+                            ) : (
+                              <span
+                                className={
+                                  s.ttfcAvgMinutes <= 15
+                                    ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-500/40"
+                                    : s.ttfcAvgMinutes <= 45
+                                    ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-amber-500/20 text-amber-100 ring-1 ring-amber-500/40"
+                                    : "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-red-500/20 text-red-100 ring-1 ring-red-500/40"
+                                }
+                              >
+                                {s.ttfcAvgMinutes} min
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Taux de setting */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            <span className={positiveRateBadgeClass(s.settingRate)}>
+                              {s.settingRate == null
+                                ? "—"
+                                : `${Math.round((s.settingRate || 0) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {!sortedSetters.length && (
+                      <tr>
+                        <td className="py-6 px-3 text-[--muted] text-sm" colSpan={12}>
+                          Aucune donnée setter sur la période sélectionnée.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
 
 
             {/* DUO STRIP */}
