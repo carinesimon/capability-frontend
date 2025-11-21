@@ -128,6 +128,7 @@ type CloserRow = {
   rv1NoShow?: number;                // ✅ nouveau
        // ✅ nouveau
   rv1CancelRate?: number | null;  // ✅ nouveau
+  
   rv1NoShowRate?: number | null;     // ✅ (utile si tu veux l'afficher plus tard)
 
   // RV2
@@ -3613,7 +3614,6 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                   <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> critique
                 </div>
               </div>
-
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[1200px]">
                   <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
@@ -3624,10 +3624,14 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                       <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
                       <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% no-show RV1</th> {/* ✅ */}
+
                       <th className="py-2.5 px-3 font-medium text-right">RV2 planifiés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV2 annulés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV2 no-show</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% no-show RV2</th> {/* ✅ */}
                       <th className="py-2.5 px-3 font-medium text-right">% annulation RV2</th>
+
                       <th className="py-2.5 px-3 font-medium text-right">Ventes</th>
                       <th className="py-2.5 px-3 font-medium text-right">CA</th>
                       <th className="py-2.5 px-3 font-medium text-right">Taux closing</th>
@@ -3673,6 +3677,17 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                           </div>
                         </td>
 
+                      {/* % no-show RV1 */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={cancelRateBadgeClass(c.rv1NoShowRate)}>
+                            {c.rv1NoShowRate == null
+                              ? "—"
+                              : `${Math.round((c.rv1NoShowRate || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
+
                         <td className={neutralKpiCell}>{c.rv2Planned ?? 0}</td>
                         <td className={neutralKpiCell}>{c.rv2Canceled ?? 0}</td>
                         <td className={neutralKpiCell}>{c.rv2NoShow ?? 0}</td>
@@ -3688,6 +3703,16 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                           </div>
                         </td>
 
+                        {/* % no-show RV2 */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex justify-end">
+                            <span className={cancelRateBadgeClass(c.rv2NoShowRate)}>
+                              {c.rv2NoShowRate == null
+                                ? "—"
+                                : `${Math.round((c.rv2NoShowRate || 0) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
                         {/* Ventes */}
                         <td className={neutralKpiCell}>{c.salesClosed ?? 0}</td>
 
@@ -3710,7 +3735,7 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                     ))}
                     {!sortedClosers.length && (
                       <tr>
-                        <td className="py-6 px-3 text-[--muted] text-sm" colSpan={13}>
+                        <td className="py-6 px-3 text-[--muted] text-sm" colSpan={15}>
                           Aucune donnée sur la période sélectionnée.
                         </td>
                       </tr>
@@ -4235,5 +4260,3 @@ async function fetchStageSeriesAny(stage: string, params: any) {
     </div>
   );
 }
-
-
