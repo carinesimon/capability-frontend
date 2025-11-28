@@ -130,18 +130,24 @@ type CloserRow = {
   rv1CancelRate?: number | null;  // ✅ nouveau
   
   rv1NoShowRate?: number | null;     // ✅ (utile si tu veux l'afficher plus tard)
+  rv1Postponed?: number;   
 
+  rv1NotQualified?:number | null;
   // RV2
   rv2Planned: number;
   rv2Honored?: number;
   rv2Canceled?: number;   
-  rv2NoShow?: number;            // ✅ important
+  rv2Postponed?: number;   
+  rv2NoShow?: number;     
+         // ✅ important
   rv2CancelRate?: number | null;  // ✅ nouveau
   rv2NoShowRate?: number | null;     // ✅
 
   // Business
   salesClosed: number;
   revenueTotal: number;
+  contractsSigned: number;
+
 
   // Optionnels existants
   roasPlanned?: number | null;
@@ -419,29 +425,33 @@ function DrillModal({
 }
 
 /* ---------- Funnel (cards cliquables) ---------- */
-type FunnelKey =
+ type FunnelKey =
+  // Top funnel
   | "leads"
   | "callRequests"
-  | "callsTotal"
-  | "callsAnswered"
-  | "setterNoShow"
-
-  | "rv0Planned"
+  // Call → RV0
   | "rv0Honored"
   | "rv0NoShow"
+  | "rv0NotQualified"
+  | "rv0Nurturing"
   | "rv0Canceled"
-
+  // RV0 → RV1
   | "rv1Planned"
   | "rv1Honored"
-  | "rv1NoShow"
-  | "rv1Canceled"
-
+  | "rv1Postponed"
+  | "rv1NoShow" 
+  | "rv1NotQualified"
+  | "rv1FollowupCloser"
+  | "rv1Canceled" 
+  // RV2
   | "rv2Planned"
   | "rv2Honored"
-  | "rv2Canceled"
+  | "rv2Postponed"
   | "rv2NoShow"
-
+  | "rv2Canceled"
+  // Sales
   | "wonCount";
+
 
 type FunnelProps = {
   data: {
@@ -455,100 +465,95 @@ type FunnelProps = {
     rv0H: number;
     rv0NS: number;
     rv0C: number;
+    rv0NQ: number;
+    rv0Nurturing: number;
 
     rv1P: number;
     rv1H: number;
     rv1NS: number;
+    rv1Postponed: number;
+    rv1FollowupCloser: number;
     rv1C: number;
+    rv1NQ: number;
 
     rv2P: number;
     rv2H: number;
     rv2NS: number;
     rv2C: number;
+    rv2Postponed: number;
 
     won: number;
   };
-  onCardClick: (key: FunnelKey) => void;
+  onCardClick?: (key: FunnelKey) => void | Promise<void>;
 };
 
-function Funnel({ data, onCardClick }: FunnelProps) {
-  type GroupId = "top" | "calls" | "rv0" | "rv1" | "rv2" | "won";
 
-  type Card = {
-    key: FunnelKey;
-    label: string;
-    value: number;
-    hint?: string;
-    group: GroupId;
-    numForRate?: number;
-    denForRate?: number;
-  };
+function Funnel({ data, onCardClick }: FunnelProps) {
+  // ✅ Groupes utilisés pour les cards ET pour la timeline
+  type CardGroup = "top" | "callToRv0" | "rv0ToRv1" | "rv2" | "sales";
+
+type Card = {
+  key: FunnelKey;
+  label: string;
+  value: number;
+  hint?: string;
+  group: CardGroup;
+  // si tu as rajouté numForRate/denForRate, garde-les ici :
+  numForRate?: number;
+  denForRate?: number;
+};
 
   const groups: {
-    id: GroupId;
+    id: CardGroup;
     title: string;
     subtitle: string;
     stepLabel: string;
-    tone:
-      | "indigo"
-      | "cyan"
-      | "amber"
-      | "violet"
-      | "rose"
-      | "emerald";
+    tone: "indigo" | "cyan" | "amber" | "violet" | "rose" | "emerald";
   }[] = [
     {
       id: "top",
-      title: "Entrée de pipeline",
-      subtitle: "Tous les leads qui tombent dans le système.",
+      title: "Vue globale du pipeline",
+      subtitle: "Leads → demandes d’appel → RV0 faits.",
       stepLabel: "Étape 1",
       tone: "indigo",
     },
     {
-      id: "calls",
-      title: "Contact & qualification",
-      subtitle:
-        "Moment où le lead passe d’un simple contact à une vraie conversation.",
+      id: "callToRv0",
+      title: "Demandes d’appel → RV0",
+      subtitle: "Comment les demandes d’appel se transforment en RV0.",
       stepLabel: "Étape 2",
       tone: "cyan",
     },
     {
-      id: "rv0",
-      title: "RV0 — Diagnostic",
-      subtitle: "RDV de découverte / cadrage avec le prospect.",
+      id: "rv0ToRv1",
+      title: "RV0 → RV1",
+      subtitle: "Qualité des RV0 et passage vers les closings.",
       stepLabel: "Étape 3",
       tone: "amber",
     },
     {
-      id: "rv1",
-      title: "RV1 — Closing",
-      subtitle: "RDV de vente principal (closing).",
+      id: "rv2",
+      title: "RV2 & suivis",
+      subtitle: "Deuxièmes RDV et stabilité des deals.",
       stepLabel: "Étape 4",
       tone: "violet",
     },
     {
-      id: "rv2",
-      title: "RV2 — Suivi / relance",
-      subtitle: "Deuxième RDV pour finir / sécuriser le deal.",
+      id: "sales",
+      title: "Ventes",
+      subtitle: "Nombre total de ventes signées.",
       stepLabel: "Étape 5",
-      tone: "rose",
-    },
-    {
-      id: "won",
-      title: "Ventes gagnées (WON)",
-      subtitle: "Leads qui deviennent des clients payants.",
-      stepLabel: "Étape 6",
       tone: "emerald",
     },
   ];
 
   const cards: Card[] = [
-    // ------- ENTRÉE -------
+    // ------- VUE GLOBALE TOP FUNNEL -------
     {
       key: "leads",
       label: "Leads reçus",
       value: data.leads,
-      hint: "Contacts créés durant la période.",
+      hint: "Leads froids entrés dans le système.",
       group: "top",
     },
     {
@@ -557,113 +562,87 @@ function Funnel({ data, onCardClick }: FunnelProps) {
       value: data.callRequests,
       hint: "Prospects qui demandent un échange.",
       group: "top",
-      numForRate: data.callRequests,
-      denForRate: data.leads,
-    },
-
-    // ------- APPELS -------
-    {
-      key: "callsTotal",
-      label: "Appels passés",
-      value: data.callsTotal,
-      hint: "Appels réellement effectués par les setters.",
-      group: "calls",
-      numForRate: data.callsTotal,
-      denForRate: data.callRequests,
-    },
-    {
-      key: "callsAnswered",
-      label: "Appels répondus",
-      value: data.callsAnswered,
-      hint: "Prospects joints au téléphone.",
-      group: "calls",
-      numForRate: data.callsAnswered,
-      denForRate: data.callsTotal,
-    },
-    {
-      key: "setterNoShow",
-      label: "No-show Setter",
-      value: data.setterNoShow,
-      hint: "Appels jamais joints / abandonnés.",
-      group: "calls",
-      numForRate: data.setterNoShow,
-      denForRate: data.callsTotal,
-    },
-
-    // ------- RV0 -------
-    {
-      key: "rv0Planned",
-      label: "RV0 planifiés",
-      value: data.rv0P,
-      hint: "Premiers RDV programmés.",
-      group: "rv0",
-      numForRate: data.rv0P,
-      denForRate: data.callsAnswered,
     },
     {
       key: "rv0Honored",
-      label: "RV0 honorés",
+      label: "RV0 faits",
+      value: data.rv0H,
+      hint: "RV0 réellement tenus avec le prospect.",
+      group: "top",
+    },
+
+    // ------- DEMANDES D’APPEL → RV0 -------
+    {
+      key: "rv0Honored",
+      label: "RV0 faits",
       value: data.rv0H,
       hint: "RV0 tenus avec le prospect.",
-      group: "rv0",
-      numForRate: data.rv0H,
-      denForRate: data.rv0P,
+      group: "callToRv0",
     },
     {
       key: "rv0NoShow",
       label: "RV0 no-show",
       value: data.rv0NS,
       hint: "Prospects absents au RV0.",
-      group: "rv0",
-      numForRate: data.rv0NS,
-      denForRate: data.rv0P,
+      group: "callToRv0",
     },
     {
-      key: "rv0Canceled",
-      label: "RV0 annulés",
-      value: data.rv0C,
-      hint: "RV0 annulés avant de se tenir.",
-      group: "rv0",
-      numForRate: data.rv0C,
-      denForRate: data.rv0P,
+      key: "rv0NotQualified",
+      label: "RV0 non qualifiés",
+      value: data.rv0NQ,
+      hint: "Prospects jugés non qualifiés dès le RV0.",
+      group: "callToRv0",
+    },
+    {
+      key: "rv0Nurturing",
+      label: "RV0 nurturing / à relancer",
+      value: data.rv0Nurturing,
+      hint: "Prospects mis en nurturing après RV0.",
+      group: "callToRv0",
     },
 
-    // ------- RV1 -------
+    // ------- RV0 → RV1 -------
     {
       key: "rv1Planned",
       label: "RV1 planifiés",
       value: data.rv1P,
       hint: "Closings programmés.",
-      group: "rv1",
-      numForRate: data.rv1P,
-      denForRate: data.rv0H,
+      group: "rv0ToRv1",
     },
     {
       key: "rv1Honored",
-      label: "RV1 honorés",
+      label: "RV1 faits",
       value: data.rv1H,
       hint: "Closings réellement tenus.",
-      group: "rv1",
-      numForRate: data.rv1H,
-      denForRate: data.rv1P,
+      group: "rv0ToRv1",
+    },
+    {
+      key: "rv1Postponed",
+      label: "RV1 reportés",
+      value: data.rv1Postponed,
+      hint: "RV1 reprogrammés à une autre date.",
+      group: "rv0ToRv1",
     },
     {
       key: "rv1NoShow",
       label: "RV1 no-show",
       value: data.rv1NS,
-      hint: "Absences au closing.",
-      group: "rv1",
-      numForRate: data.rv1NS,
-      denForRate: data.rv1P, 
+      hint: "Absences au RV1.",
+      group: "rv0ToRv1",
     },
     {
-      key: "rv1Canceled",
-      label: "RV1 annulés",
-      value: data.rv1C,
-      hint: "Closings annulés avant d’avoir lieu.",
-      group: "rv1",
-      numForRate: data.rv1C,
-      denForRate: data.rv1P,
+      key: "rv1NotQualified",
+      label: "RV1 non qualifiés",
+      value: data.rv1NQ,
+      hint: "Prospects sortis du pipe après RV1.",
+      group: "rv0ToRv1",
+    },
+    {
+      key: "rv1FollowupCloser",
+      label: "RV1 follow-up closer",
+      value: data.rv1FollowupCloser,
+      hint: "Dossiers en suivi par le closer après RV1.",
+      group: "rv0ToRv1",
     },
 
     // ------- RV2 -------
@@ -673,26 +652,27 @@ function Funnel({ data, onCardClick }: FunnelProps) {
       value: data.rv2P,
       hint: "Deuxièmes RDV programmés.",
       group: "rv2",
-      numForRate: data.rv2P,
-      denForRate: data.rv1H,
     },
     {
       key: "rv2Honored",
-      label: "RV2 honorés",
+      label: "RV2 faits",
       value: data.rv2H,
       hint: "Deuxièmes RDV tenus.",
       group: "rv2",
-      numForRate: data.rv2H,
-      denForRate: data.rv2P,
+    },
+    {
+      key: "rv2Postponed",
+      label: "RV2 reportés",
+      value: data.rv2Postponed,
+      hint: "RV2 reprogrammés à une autre date.",
+      group: "rv2",
     },
     {
       key: "rv2NoShow",
       label: "RV2 no-show",
       value: data.rv2NS,
-      hint: "Absences au closing.",
+      hint: "Absences au RV2.",
       group: "rv2",
-      numForRate: data.rv2NS,
-      denForRate: data.rv2P,
     },
     {
       key: "rv2Canceled",
@@ -700,8 +680,6 @@ function Funnel({ data, onCardClick }: FunnelProps) {
       value: data.rv2C,
       hint: "RV2 annulés avant d’avoir lieu.",
       group: "rv2",
-      numForRate: data.rv2C,
-      denForRate: data.rv2P,
     },
 
     // ------- VENTES -------
@@ -709,22 +687,12 @@ function Funnel({ data, onCardClick }: FunnelProps) {
       key: "wonCount",
       label: "Ventes (WON)",
       value: data.won,
-      hint: "Dossiers passés en client.",
-      group: "won",
-      numForRate: data.won,
-      denForRate: data.leads,
+      hint: "Dossiers passés en client (nombre de ventes).",
+      group: "sales",
     },
   ];
 
-  const ratePct = (num?: number, den?: number) => {
-    if (!den || den <= 0) return null;
-    const pct = Math.round(((num || 0) / den) * 100);
-    return isNaN(pct) ? null : pct;
-  };
-
-  const toneClasses = (
-    tone: (typeof groups)[number]["tone"]
-  ) => {
+  const toneClasses = (tone: (typeof groups)[number]["tone"]) => {
     switch (tone) {
       case "indigo":
         return "border-indigo-400/40 hover:border-indigo-200/90 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,0.35),rgba(15,23,42,0.98))]";
@@ -753,11 +721,8 @@ function Funnel({ data, onCardClick }: FunnelProps) {
     <div className="space-y-4">
       {/* Timeline horizontale du funnel (au-dessus, très lisible) */}
       <div className="hidden lg:flex items-center justify-between gap-3 text-[11px] text-[--muted]">
-        {grouped.map((g, index) => (
-          <div
-            key={g.id}
-            className="flex-1 flex flex-col items-center gap-1"
-          >
+        {grouped.map((g) => (
+          <div key={g.id} className="flex-1 flex flex-col items-center gap-1">
             <div className="flex items-center gap-2">
               <div className="h-px w-6 bg-gradient-to-r from-white/0 via-white/40 to-white/0" />
               <div className="rounded-full border border-white/15 bg-black/40 px-3 py-0.5">
@@ -774,7 +739,7 @@ function Funnel({ data, onCardClick }: FunnelProps) {
         ))}
       </div>
 
-      {/* Groupes de tuiles cliquables */}
+      {/* Groupes de tuiles cliquables (chiffres uniquement) */}
       <div className="space-y-3">
         {grouped.map((g) => (
           <div
@@ -791,109 +756,54 @@ function Funnel({ data, onCardClick }: FunnelProps) {
                 </div>
               </div>
               <div className="hidden sm:block text-[10px] text-[--muted]">
-                Clique une tuile pour voir les leads
-                correspondants.
+                Clique une tuile pour voir les leads correspondants.
               </div>
             </div>
 
             <div className="flex gap-2 overflow-x-auto pb-2">
-              {g.items.map((c) => {
-                const pct = ratePct(
-                  c.numForRate,
-                  c.denForRate
-                );
-                return (
-                  <motion.button
-                    key={c.key}
-                    type="button"
-                    whileHover={{ y: -2, scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => onCardClick(c.key)}
-                    className={[
-                      "group relative min-w-[190px] max-w-xs flex-1 rounded-2xl px-3 py-2.5 text-left",
-                      "shadow-[0_18px_40px_rgba(0,0,0,0.9)]",
-                      "transition-all duration-200",
-                      toneClasses(g.tone),
-                    ].join(" ")}
-                  >
-                    {/* Label */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-[10px] uppercase tracking-wide text-white/70">
-                        {c.label}
-                      </div>
-                      {pct !== null && (
-                        <span className="text-[9px] rounded-full border border-white/20 bg-black/40 px-2 py-0.5 text-[--muted]">
-                          vs étape précédente
-                        </span>
-                      )}
+              {g.items.map((c) => (
+                <motion.button
+                  key={c.key ?? c.label}
+                  type="button"
+                  whileHover={{ y: -2, scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  disabled={!onCardClick || !c.key}
+                  onClick={() => c.key && onCardClick?.(c.key)}
+                  className={[
+                    "group relative min-w-[190px] max-w-xs flex-1 rounded-2xl px-3 py-2.5 text-left",
+                    "shadow-[0_18px_40px_rgba(0,0,0,0.9)]",
+                    "transition-all duration-200",
+                    toneClasses(g.tone),
+                    !onCardClick || !c.key ? "opacity-70 cursor-default" : "cursor-pointer",
+                  ].join(" ")}
+                >
+                  {/* Label */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[10px] uppercase tracking-wide text-white/80">
+                      {c.label}
                     </div>
+                  </div>
 
-                    {/* Zone centrale : % EN GROS + compteur */}
-                    <div className="mt-1 flex items-center gap-3">
-                      <div className="flex flex-col">
-                        <div className="flex items-baseline gap-1">
-                          {pct !== null ? (
-                            <>
-                              <span className="text-2xl font-semibold">
-                                {pct}
-                              </span>
-                              <span className="text-sm font-semibold">
-                                %
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-2xl font-semibold">
-                              {fmtInt(c.value)}
-                            </span>
-                          )}
-                        </div>
-                        {pct !== null && (
-                          <div className="text-[11px] text-[--muted]">
-                            {fmtInt(c.numForRate || 0)} /{" "}
-                            {fmtInt(c.denForRate || 0)}
-                          </div>
-                        )}
-                      </div>
+                  {/* Chiffre principal */}
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-2xl font-semibold">
+                      {fmtInt(c.value)}
+                    </span>
+                  </div>
 
-                      {/* Mini barre de progression à droite */}
-                      {pct !== null && (
-                        <div className="flex-1">
-                          <div className="h-1.5 w-full rounded-full bg-black/40 overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-emerald-300 via-cyan-300 to-emerald-400"
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  pct
-                                )}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      )}
+                  {/* Hint */}
+                  {c.hint && (
+                    <div className="mt-1 text-[11px] leading-snug text-[--muted]">
+                      {c.hint}
                     </div>
+                  )}
 
-                    {/* Ligne détail volume */}
-                    {pct === null && (
-                      <div className="mt-1 text-[11px] text-[--muted]">
-                        Volume brut :{" "}
-                        <b>{fmtInt(c.value)}</b>
-                      </div>
-                    )}
-
-                    {c.hint && (
-                      <div className="mt-1 text-[11px] leading-snug text-[--muted]">
-                        {c.hint}
-                      </div>
-                    )}
-
-                    {/* Effet hover subtil */}
-                    <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="absolute inset-x-0 -bottom-6 h-16 bg-gradient-to-t from-black/60 via-black/30 to-transparent" />
-                    </div>
-                  </motion.button>
-                );
-              })}
+                  {/* Effet hover subtil */}
+                  <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute inset-x-0 -bottom-6 h-16 bg-gradient-to-t from-black/60 via-black/30 to-transparent" />
+                  </div>
+                </motion.button>
+              ))}
             </div>
           </div>
         ))}
@@ -945,8 +855,9 @@ function normalizeTotals(
     }
     return 0;
   };
+
   return {
-    // Entrées de pipeline
+    // -------- Entrées de pipeline --------
     LEADS_RECEIVED: pick(
       "LEADS_RECEIVED",
       "LEAD_RECEIVED",
@@ -954,17 +865,22 @@ function normalizeTotals(
       "LEAD_REÇU",
       "LEADS"
     ),
+
     CALL_REQUESTED: pick(
       "CALL_REQUESTED",
       "DEMANDE_APPEL",
-      "CALL_REQUEST"
+      "CALL_REQUEST",
+      "APPOINTMENT_REQUEST"
     ),
+
     CALL_ATTEMPT: pick(
       "CALL_ATTEMPT",
       "APPEL_PASSE",
+      "APPEL_PASSÉ",
       "CALLS_TOTAL",
       "CALL_MADE"
     ),
+
     CALL_ANSWERED: pick(
       "CALL_ANSWERED",
       "APPEL_REPONDU",
@@ -974,30 +890,85 @@ function normalizeTotals(
 
     SETTER_NO_SHOW: pick("SETTER_NO_SHOW", "NO_SHOW_SETTER"),
 
+    // -------- RV0 (diagnostic) --------
     RV0_PLANNED: pick("RV0_PLANNED", "RV0_PLANIFIE", "RV0_PLANIFIÉ"),
     RV0_HONORED: pick("RV0_HONORED", "RV0_HONORE", "RV0_HONORÉ"),
     RV0_NO_SHOW: pick("RV0_NO_SHOW"),
 
+    // Nouveaux : RV0 non qualifiés & nurturing (follow-up setter)
+    RV0_NOT_QUALIFIED_1: pick(
+      "RV0_NOT_QUALIFIED_1",
+      "RV0_NOT_QUALIFIE_1",
+      "RV0_NOT_QUALIFIÉ_1"
+    ),
+    RV0_NOT_QUALIFIED_2: pick(
+      "RV0_NOT_QUALIFIED_2",
+      "RV0_NOT_QUALIFIE_2",
+      "RV0_NOT_QUALIFIÉ_2"
+    ),
+    RV0_NURTURING: pick(
+      "RV0_NURTURING",
+      "NURTURING_RV0",
+      "FOLLOW_UP",
+      "FOLLOW_UP_SETTER"
+    ),
+
+    // -------- RV1 (closing) --------
     RV1_PLANNED: pick("RV1_PLANNED", "RV1_PLANIFIE", "RV1_PLANIFIÉ"),
     RV1_HONORED: pick("RV1_HONORED", "RV1_HONORE", "RV1_HONORÉ"),
     RV1_NO_SHOW: pick("RV1_NO_SHOW"),
 
+    // Non qualifiés RV1 (exigence Cyrille)
+    RV1_NOT_QUALIFIED: pick(
+      "RV1_NOT_QUALIFIED",
+      "NOT_QUALIFIED_RV1",
+      "RV1_NON_QUALIFIE",
+      "RV1_NON_QUALIFIÉ"
+    ),
+
+    // Follow up côté closer (exigence : Follow up Closer séparé)
+    RV1_FOLLOWUP: pick(
+      "FOLLOW_UP_CLOSER",
+      "RV1_FOLLOW_UP",
+      "FOLLOW_UP_RV1",
+      "FOLLOWUP_CLOSER"
+    ),
+
+    // -------- RV2 (suivi / relance) --------
     RV2_PLANNED: pick("RV2_PLANNED", "RV2_PLANIFIE", "RV2_PLANIFIÉ"),
     RV2_HONORED: pick("RV2_HONORED", "RV2_HONORE", "RV2_HONORÉ"),
     RV2_NO_SHOW: pick("RV2_NO_SHOW"),
 
-    // --- RDV annulés par type (nouvelles clés) ---
+    // --- RDV annulés par type (on garde pour backend / graph) ---
     RV0_CANCELED: pick("RV0_CANCELED", "RV0_ANNULÉ", "RV0_ANNULE"),
     RV1_CANCELED: pick("RV1_CANCELED", "RV1_ANNULÉ", "RV1_ANNULE"),
     RV2_CANCELED: pick("RV2_CANCELED", "RV2_ANNULÉ", "RV2_ANNULE"),
 
+    // --- RDV reportés (POSTPONED = reporté) ---
+    RV1_POSTPONED: pick(
+      "RV1_POSTPONED",
+      "RV1_RESCHEDULED",
+      "RV1_REPORTÉ",
+      "RV1_REPORTE"
+    ),
+    RV2_POSTPONED: pick(
+      "RV2_POSTPONED",
+      "RV2_RESCHEDULED",
+      "RV2_REPORTÉ",
+      "RV2_REPORTE"
+    ),
+
+    // -------- Sorties de pipeline --------
     WON: pick("WON"),
+
     LOST: pick("LOST"),
+
     NOT_QUALIFIED: pick(
       "NOT_QUALIFIED",
       "NON_QUALIFIE",
       "NON_QUALIFIÉ"
     ),
+
     APPOINTMENT_CANCELED: pick(
       "APPOINTMENT_CANCELED",
       "APPOINTMENT_CANCELLED",
@@ -1081,6 +1052,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [setters, setSetters] = useState<SetterRow[]>([]);
   const [closers, setClosers] = useState<CloserRow[]>([]);
+  //const [rv0Daily, setRv0Daily] = useState<MetricSeriesOut | null>(null);
   const [summary, setSummary] =
     useState<SummaryOut | null>(null);
   const [leadsRcv, setLeadsRcv] =
@@ -1489,6 +1461,8 @@ useEffect(() => {
           const rv2NoShow = Number(c.rv2NoShow || 0);
 
           const salesClosed = Number(c.salesClosed || 0);
+          const contractsSigned = Number(c.contractsSigned || 0);
+
           const revenueTotal = Number(c.revenueTotal || 0);
 
           return {
@@ -1520,6 +1494,7 @@ useEffect(() => {
 
             salesClosed,
             revenueTotal,
+            contractsSigned,
             roasPlanned: c.roasPlanned ?? null,
             roasHonored: c.roasHonored ?? null,
             closingRate: rv1Honored
@@ -1549,15 +1524,7 @@ useEffect(() => {
 
 
  // (NOUVEAU) Annulés par jour via historisation (StageEvent)
-type CanceledDailyRow = {
-  day: string;            // YYYY-MM-DD
-  RV0_CANCELED: number;
-  RV1_CANCELED: number;
-  RV2_CANCELED: number;
-  total: number;
-};
-type CanceledDailyOut = { total: number; byDay: CanceledDailyRow[] };
-
+/*
 useEffect(() => {
   let cancelled = false;
   (async () => {
@@ -1635,7 +1602,7 @@ useEffect(() => {
   })();
 
   return () => { cancelled = true; };
-}, [fromISO, toISO, tz]);
+}, [fromISO, toISO, tz]);*/
 
 
   // 💎 Duos (équipe de choc) — chargement manquant avant
@@ -1836,9 +1803,135 @@ useEffect(() => {
   const kpiRv1HonoredPrev =
     summaryPrev?.totals?.rv1Honored ?? 0;
 
-    const [canceledDaily, setCanceledDaily] = useState<{ total: number; byDay: Array<{
+
+  type AnnulPostDailyRow = {
+    day: string;
+    rv1CanceledPostponed: number;
+    rv2CanceledPostponed: number;
+    total: number;
+  };
+
+    /*const [canceledDaily, setCanceledDaily] = useState<{ total: number; byDay: Array<{
       day: string; RV0_CANCELED: number; RV1_CANCELED: number; RV2_CANCELED: number; total: number;
-    }>}>({ total: 0, byDay: [] });
+    }>}>({ total: 0, byDay: [] });*/
+
+  type MetricSeriesRow = { day: string; count: number };
+  type MetricSeriesOut = {
+    total: number;
+    byDay: MetricSeriesRow[];
+  };
+
+  // déjà ton canceledDaily plus bas, on le garde mais on va le modifier après
+  const [canceledDaily, setCanceledDaily] = useState<{
+    total: number;
+    byDay: AnnulPostDailyRow[];
+  }>({ total: 0, byDay: [] });
+
+  // ➕ Nouveau : série quotidienne RV0 honorés
+  const [rv0Daily, setRv0Daily] = useState<MetricSeriesOut | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!fromISO || !toISO) {
+        if (!cancelled) setRv0Daily(null);
+        return;
+      }
+
+      try {
+        // on utilise ton helper robuste qui gère RV0_HONORED / RV0_HONOURED
+        const res = await fetchStageSeriesAny("RV0_HONORED", {
+          from: fromISO,
+          to: toISO,
+          tz,
+        });
+        if (!cancelled) setRv0Daily(res);
+      } catch {
+        if (!cancelled) setRv0Daily(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fromISO, toISO, tz]);
+
+
+useEffect(() => {
+  let cancelled = false;
+
+  (async () => {
+    try {
+      if (!fromISO || !toISO) {
+        if (!cancelled) setCanceledDaily({ total: 0, byDay: [] });
+        return;
+      }
+
+      // On récupère 4 séries : RV1 annulé / reporté, RV2 annulé / reporté
+      const [rv1C, rv1P, rv2C, rv2P] = await Promise.all([
+        fetchStageSeriesAny("RV1_CANCELED",  { from: fromISO, to: toISO, tz }),
+        fetchStageSeriesAny("RV1_POSTPONED", { from: fromISO, to: toISO, tz }),
+        fetchStageSeriesAny("RV2_CANCELED",  { from: fromISO, to: toISO, tz }),
+        fetchStageSeriesAny("RV2_POSTPONED", { from: fromISO, to: toISO, tz }),
+      ]);
+
+      const map = new Map<string, { rv1: number; rv2: number }>();
+
+      const add = (src: MetricSeriesOut | null | undefined, key: "rv1" | "rv2") => {
+        const arr = src?.byDay ?? [];
+        for (const it of arr) {
+          if (!it?.day) continue;
+          const dayKey =
+            it.day.length >= 10
+              ? it.day.slice(0, 10)
+              : new Date(it.day).toISOString().slice(0, 10);
+          const row = map.get(dayKey) ?? { rv1: 0, rv2: 0 };
+          row[key] += Number(it.count || 0);
+          map.set(dayKey, row);
+        }
+      };
+
+      // RV1 = annulé + reporté
+      add(rv1C, "rv1");
+      add(rv1P, "rv1");
+      // RV2 = annulé + reporté
+      add(rv2C, "rv2");
+      add(rv2P, "rv2");
+
+      // Générer un range continu YYYY-MM-DD
+      const out: AnnulPostDailyRow[] = [];
+      const start = new Date(fromISO);
+      const end = new Date(toISO);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(0, 0, 0, 0);
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const key = `${y}-${m}-${dd}`;
+        const bucket = map.get(key) ?? { rv1: 0, rv2: 0 };
+        out.push({
+          day: key,
+          rv1CanceledPostponed: bucket.rv1,
+          rv2CanceledPostponed: bucket.rv2,
+          total: bucket.rv1 + bucket.rv2,
+        });
+      }
+
+      const total = out.reduce((s, x) => s + (x.total || 0), 0);
+
+      if (!cancelled) setCanceledDaily({ total, byDay: out });
+    } catch {
+      if (!cancelled) setCanceledDaily({ total: 0, byDay: [] });
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [fromISO, toISO, tz]);
 
   // ======= DRILLS : helpers endpoints =======
   async function openAppointmentsDrill(params: {
@@ -1990,143 +2083,165 @@ async function fetchStageSeriesAny(stage: string, params: any) {
   const total = byDay.reduce((s,x)=>s+x.count,0);
   return { total, byDay } as MetricSeriesOut;
 }
-  const onFunnelCardClick = async (
-    key:
-      | "leads"
-      | "callRequests"
-      | "callsTotal"
-      | "callsAnswered"
-      | "setterNoShow"
-      | "rv0Planned"
-      | "rv0Honored"
-      | "rv0NoShow"
-      | "rv0Canceled"
-      | "rv1Planned"
-      | "rv1Honored"
-      | "rv1NoShow"
-      | "rv1Canceled"
-      | "rv2Planned"
-      | "rv2Honored"
-      | "rv2NoShow"
-      | "rv2Canceled"
-      | "wonCount"
-  ) => {
-    switch (key) {
-      case "leads": {
-        const res = await api.get(
-          "/reporting/drill/leads-received",
-          {
-            params: {
-              from: fromISO,
-              to: toISO,
-              limit: 2000, tz,
-            },
-          }
-        );
-        setDrillTitle("Leads reçus – détail");
-        setDrillRows(res.data?.items || []);
-        setDrillOpen(true);
-        return;
-      }
-      case "callRequests":
-        return openCallRequestsDrill();
-      case "callsTotal":
-        return openCallsDrill();
-      case "callsAnswered":
-        return openCallsAnsweredDrill();
-      case "setterNoShow":
-        return openSetterNoShowDrill();
 
-      case "rv0Planned":
-        return openAppointmentsDrill({
-          title: "RV0 planifiés (détail)",
-          type: "RV0",
-        });
-      case "rv0Honored":
-        return openAppointmentsDrill({
-          title: "RV0 honorés (détail)",
-          type: "RV0",
-          status: "HONORED",
-        });
-      case "rv0NoShow":
-        return openAppointmentsDrill({
-          title: "RV0 no-show (détail)",
-          type: "RV0",
-          status: "NO_SHOW",
-        });
+type KpiTone = "primary" | "success" | "warning" | "danger" | "info" | "muted";
 
-      case "rv1Planned":
-        return openAppointmentsDrill({
-          title: "RV1 planifiés (détail)",
-          type: "RV1",
-        });
-      case "rv1Honored":
-        return openAppointmentsDrill({
-          title: "RV1 honorés (détail)",
-          type: "RV1",
-          status: "HONORED",
-        });
-      case "rv1NoShow":
-        return openAppointmentsDrill({
-          title: "RV1 no-show (détail)",
-          type: "RV1",
-          status: "NO_SHOW",
-        });
+const kpiBoxToneClasses: Record<KpiTone, string> = {
+  primary:
+    "border-white/10 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,.18),_transparent_55%),_rgba(15,23,42,.96)]",
+  success:
+    "border-emerald-400/40 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,.20),_transparent_55%),_rgba(9,18,32,.98)]",
+  warning:
+    "border-amber-400/40 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,.20),_transparent_55%),_rgba(15,23,42,.96)]",
+  danger:
+    "border-rose-500/45 bg-[radial-gradient(circle_at_top,_rgba(244,63,94,.22),_transparent_55%),_rgba(15,23,42,.96)]",
+  info:
+    "border-sky-400/40 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,.20),_transparent_55%),_rgba(15,23,42,.96)]",
+  muted:
+    "border-slate-400/25 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,.18),_transparent_55%),_rgba(15,23,42,.96)]",
+};
 
-      case "rv2Planned":
-        return openAppointmentsDrill({
-          title: "RV2 planifiés (détail)",
-          type: "RV2",
-        });
-      case "rv2Honored":
-        return openAppointmentsDrill({
-          title: "RV2 honorés (détail)",
-          type: "RV2",
-          status: "HONORED",
-        });
-      case "rv2NoShow":
-        return openAppointmentsDrill({
-          title: "RV2 no-show (détail)",
-          type: "RV2",
-          status: "NO_SHOW",
-        });
+function KpiBox({
+  tone = "primary",
+  children,
+}: {
+  tone?: KpiTone;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={[
+        "rounded-2xl px-3 py-2.5",
+        "shadow-[0_18px_45px_rgba(0,0,0,.65)]",
+        "backdrop-blur-xl border",
+        "transition-transform duration-150 hover:-translate-y-[1px]",
+        kpiBoxToneClasses[tone],
+      ].join(" ")}
+    >
+      {children}
+    </div>
+  );
+}
 
-      case "wonCount": {
-        const res = await api.get("/reporting/drill/won", {
-          params: {
-            from: fromISO,
-            to: toISO,
-            limit: 2000, tz,
-          },
-        });
-        setDrillTitle("Ventes (WON) – détail");
-        setDrillRows(res.data?.items || []);
-        setDrillOpen(true);
-        return;
-      }
-      case "rv0Canceled":
-        return openAppointmentsDrill({
-          title: "RV0 annulés (détail)",
-          type: "RV0",
-          status: "CANCELED",
-        });
-      case "rv1Canceled":
-        return openAppointmentsDrill({
-          title: "RV1 annulés (détail)",
-          type: "RV1",
-          status: "CANCELED",
-        });
-      case "rv2Canceled":
-        return openAppointmentsDrill({
-          title: "RV2 annulés (détail)",
-          type: "RV2",
-          status: "CANCELED",
-        });
-
-      default:
-        return;
+  const onFunnelCardClick = async (key: FunnelKey): Promise<void> => {
+  switch (key) {
+    case "leads": {
+      const res = await api.get("/reporting/drill/leads-received", {
+        params: {
+          from: fromISO,
+          to: toISO,
+          limit: 2000,
+          tz,
+        },
+      });
+      setDrillTitle("Leads reçus – détail");
+      setDrillRows(res.data?.items || []);
+      setDrillOpen(true);
+      return;
     }
-  };
+
+    case "callRequests":
+      return openCallRequestsDrill();
+
+    case "rv0NoShow":
+      return openSetterNoShowDrill();
+
+    case "rv0Honored":
+      return openAppointmentsDrill({
+        title: "RV0 honorés (détail)",
+        type: "RV0",
+        status: "HONORED",
+      });
+
+    case "rv0NoShow":
+      return openAppointmentsDrill({
+        title: "RV0 no-show (détail)",
+        type: "RV0",
+        status: "NO_SHOW",
+      });
+
+    case "rv1Planned":
+      return openAppointmentsDrill({
+        title: "RV1 planifiés (détail)",
+        type: "RV1",
+      });
+
+    case "rv1Honored":
+      return openAppointmentsDrill({
+        title: "RV1 honorés (détail)",
+        type: "RV1",
+        status: "HONORED",
+      });
+
+    case "rv1NoShow":
+      return openAppointmentsDrill({
+        title: "RV1 no-show (détail)",
+        type: "RV1",
+        status: "NO_SHOW",
+      });
+
+    case "rv2Planned":
+      return openAppointmentsDrill({
+        title: "RV2 planifiés (détail)",
+        type: "RV2",
+      });
+
+    case "rv2Honored":
+      return openAppointmentsDrill({
+        title: "RV2 honorés (détail)",
+        type: "RV2",
+        status: "HONORED",
+      });
+
+    case "rv2NoShow":
+      return openAppointmentsDrill({
+        title: "RV2 no-show (détail)",
+        type: "RV2",
+        status: "NO_SHOW",
+      });
+
+    case "wonCount": {
+      const res = await api.get("/reporting/drill/won", {
+        params: {
+          from: fromISO,
+          to: toISO,
+          limit: 2000,
+          tz,
+        },
+      });
+      setDrillTitle("Ventes (WON) – détail");
+      setDrillRows(res.data?.items || []);
+      setDrillOpen(true);
+      return;
+    }
+
+    case "rv0Canceled":
+      return openAppointmentsDrill({
+        title: "RV0 annulés (détail)",
+        type: "RV0",
+        status: "CANCELED",
+      });
+
+    case "rv1Canceled":
+      return openAppointmentsDrill({
+        title: "RV1 annulés (détail)",
+        type: "RV1",
+        status: "CANCELED",
+      });
+
+    case "rv2Canceled":
+      return openAppointmentsDrill({
+        title: "RV2 annulés (détail)",
+        type: "RV2",
+        status: "CANCELED",
+      });
+
+    // 🔹 Tous les autres FunnelKey que tu as (rv0NotQualified, rv0Nurturing, etc.)
+    // tomberont ici et ne feront rien (ce qui est correct)
+    default:
+      return;
+  }
+};
 
   if (!authChecked) {
     return (
@@ -2236,7 +2351,7 @@ async function fetchStageSeriesAny(stage: string, params: any) {
 
           {/* KPI principaux */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <motion.div
+           <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               className="card"
@@ -2259,7 +2374,7 @@ async function fetchStageSeriesAny(stage: string, params: any) {
               </div>
             </motion.div>
 
-            <motion.div
+             {/*<motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               className="card"
@@ -2280,7 +2395,7 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                 Basé sur les{" "}
                 <b>créations de contacts</b>.
               </div>
-            </motion.div>
+            </motion.div>*/}
 
             <motion.div
               initial={{ opacity: 0, y: 6 }}
@@ -2391,68 +2506,82 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                   </div>
                 );
               }
-              return (
-                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-                  {chip(
-                    "Leads",
-                    (leadsRcv?.total ?? 0) ||
-                      N.LEADS_RECEIVED
-                  )}
-                  {chip(
-                    "Demandes d’appel",
-                    N.CALL_REQUESTED
-                  )}
-                  {chip(
-                    "Appels passés",
-                    N.CALL_ATTEMPT,
-                    N.CALL_ANSWERED
-                      ? `${Math.round(
-                          (N.CALL_ANSWERED /
-                            Math.max(1, N.CALL_ATTEMPT)) *
-                            100
-                        )}% répondus`
-                      : undefined
-                  )}
-                  {chip("RV1 planifiés", N.RV1_PLANNED)}
-                  {chip(
-                    "RV1 honorés",
-                    N.RV1_HONORED,
-                    N.RV1_PLANNED
-                      ? `${Math.round(
-                          (N.RV1_HONORED /
-                            Math.max(
-                              1,
-                              N.RV1_PLANNED
-                            )) *
-                            100
-                        )}% présence`
-                      : undefined
-                  )}
-                  {chip("WON", N.WON)}
+              return (() => {
+                const N = normalizeTotals(totals as any);
 
-                  {chip("RV0 annulés",
-                    N.RV0_CANCELED,
-                    N.RV0_PLANNED
-                      ? `${Math.round((N.RV0_CANCELED / Math.max(1, N.RV0_PLANNED)) * 100)}% des RV0 planifiés`
-                      : undefined
-                  )}
-                  {chip(
-                    "RV1 annulés",
-                    N.RV1_CANCELED,
-                    N.RV1_PLANNED
-                      ? `${Math.round((N.RV1_CANCELED / Math.max(1, N.RV1_PLANNED)) * 100)}% des RV1 planifiés`
-                      : undefined
-                  )}
-                  {chip(
-                    "RV2 annulés",
-                    N.RV2_CANCELED,
-                    N.RV2_PLANNED
-                      ? `${Math.round((N.RV2_CANCELED / Math.max(1, N.RV2_PLANNED)) * 100)}% des RV2 planifiés`
-                      : undefined
-                  )}
+                const chip = (
+                  label: string,
+                  value: number | string,
+                  hint?: string
+                ) => (
+                  <div className="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-colors px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-wide text-[--muted]">
+                      {label}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold">
+                      {typeof value === "number"
+                        ? value.toLocaleString("fr-FR")
+                        : value}
+                    </div>
+                    {hint && (
+                      <div className="text-[10px] text-[--muted] mt-0.5">
+                        {hint}
+                      </div>
+                    )}
+                  </div>
+                );
 
-                </div>
-              );
+                if (funnelLoading) {
+                  return (
+                    <div className="mt-3 text-[--muted] text-sm">
+                      Chargement des métriques du funnel…
+                    </div>
+                  );
+                }
+
+                if (funnelError) {
+                  return (
+                    <div className="mt-3 text-rose-300 text-sm">
+                      Erreur funnel: {String(funnelError)}
+                    </div>
+                  );
+                }
+
+                const leadsTotal =
+                  (leadsRcv?.total ?? 0) || N.LEADS_RECEIVED;
+                const callReq = N.CALL_REQUESTED;
+                const rv0Done = N.RV0_HONORED;
+
+                return (
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {chip(
+                      "Leads reçus",
+                      leadsTotal,
+                      "Base 100 % – tous les leads froids"
+                    )}
+
+                    {chip(
+                      "Demandes d’appel",
+                      callReq,
+                      leadsTotal
+                        ? `${Math.round(
+                            (callReq / Math.max(1, leadsTotal)) * 100
+                          )}% des leads`
+                        : undefined
+                    )}
+
+                    {chip(
+                      "RV0 faits",
+                      rv0Done,
+                      callReq
+                        ? `${Math.round(
+                            (rv0Done / Math.max(1, callReq)) * 100
+                          )}% des demandes d’appel`
+                        : undefined
+                    )}
+                  </div>
+                );
+              })();
             })
             ()}
 
@@ -2490,16 +2619,21 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                           rv0H: N.RV0_HONORED,
                           rv0NS: N.RV0_NO_SHOW,
                           rv0C: N.RV0_CANCELED,
-
+                          rv0NQ: N.RV0_NOT_QUALIFIED_1,
+                          rv0Nurturing: N.RV0_NURTURING,
                           rv1P: N.RV1_PLANNED,
                           rv1H: N.RV1_HONORED,
                           rv1NS: N.RV1_NO_SHOW,
-                          rv1C: N.RV1_CANCELED,
+                          rv1Postponed: N.RV1_POSTPONED,
+                          rv1FollowupCloser: N.RV1_FOLLOWUP,
 
+                          rv1C: N.RV1_CANCELED,
+                          rv1NQ: N.RV1_NOT_QUALIFIED,
                           rv2P: N.RV2_PLANNED,
                           rv2H: N.RV2_HONORED,
                           rv2NS: N.RV2_NO_SHOW,
                           rv2C: N.RV2_CANCELED,
+                          rv2Postponed: N.RV2_POSTPONED,
 
                           won: N.WON,
                           
@@ -2512,98 +2646,260 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                   {/* Ratios avancés */}
                   {(() => {
                     const N = normalizeTotals(totals as any);
-                    return (
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                        <KpiRatio
-                          label="Lead → Demande d’appel"
-                          num={N.CALL_REQUESTED}
-                          den={
-                            (leadsRcv?.total ?? 0) ||
-                            N.LEADS_RECEIVED
-                          }
-                        />
-                        <KpiRatio
-                          label="Demande → Appel passé"
-                          num={N.CALL_ATTEMPT}
-                          den={N.CALL_REQUESTED}
-                        />
-                        <KpiRatio
-                          label="Appel → Contact (répondu)"
-                          num={N.CALL_ANSWERED}
-                          den={N.CALL_ATTEMPT}
-                        />
-                        <KpiRatio
-                          label="Contact → RV0 planifié"
-                          num={N.RV0_PLANNED}
-                          den={N.CALL_ANSWERED}
-                        />
 
-                        <KpiRatio
-                          label="RV0 honoré / planifié"
-                          num={N.RV0_HONORED}
-                          den={N.RV0_PLANNED}
-                        />
-                        <KpiRatio
-                          label="RV0 no-show / planifié"
-                          num={N.RV0_NO_SHOW}
-                          den={N.RV0_PLANNED}
-                          inverse
-                        />
-                        <KpiRatio
-                          label="RV0 annulé / planifié"
-                          num={N.RV0_CANCELED}
-                          den={N.RV0_PLANNED}
-                          inverse
-                        />
-                        <KpiRatio
-                          label="RV0 honoré → RV1 planifié"
-                          num={N.RV1_PLANNED}
-                          den={N.RV0_HONORED}
-                        />
-                        <KpiRatio
-                          label="RV1 honoré / planifié"
-                          num={N.RV1_HONORED}
-                          den={N.RV1_PLANNED}
-                        />
-                        <KpiRatio
-                          label="RV1 no-show / planifié"
-                          num={N.RV1_NO_SHOW}
-                          den={N.RV1_PLANNED}
-                          inverse
-                        />
-                        <KpiRatio
-                          label="RV1 annulé / planifié"
-                          num={N.RV1_CANCELED}
-                          den={N.RV1_PLANNED}
-                          inverse
-                        />
-                        <KpiRatio
-                          label="RV2 honoré / planifié"
-                          num={N.RV2_HONORED}
-                          den={N.RV2_PLANNED}
-                        />
-                        <KpiRatio
-                          label="RV2 no-show / planifié "
-                          num={N.RV2_NO_SHOW}
-                          den={N.RV2_PLANNED}
-                        />
-                        <KpiRatio
-                          label="RV2 annulé / planifié"
-                          num={N.RV2_CANCELED}
-                          den={N.RV2_PLANNED}
-                          inverse
-                        />
-                        <KpiRatio
-                          label="Conversion finale (WON / Leads)"
-                          num={N.WON}
-                          den={
-                            (leadsRcv?.total ?? 0) ||
-                            N.LEADS_RECEIVED
-                          }
-                        />
+                    const leadsTotal =
+                      (leadsRcv?.total ?? 0) || N.LEADS_RECEIVED;
+                    const callReq = N.CALL_REQUESTED;
+                    const rv0Done = N.RV0_HONORED;
+                    const rv0NoShow = N.RV0_NO_SHOW;
+                    const nonQual = N.NOT_QUALIFIED || 0;
+                    const rv0NonQual = N.RV0_NOT_QUALIFIED_1 ?? 0;
+
+                    const rv1Planned = N.RV1_PLANNED ?? 0;
+                    const rv1Honored = N.RV1_HONORED ?? 0;
+                    const rv1Postponed = N.RV1_POSTPONED ?? 0;
+                    const rv1NoShow = N.RV1_NO_SHOW ?? 0;
+                    const rv1NonQual = N.RV1_NOT_QUALIFIED ?? 0;
+                    const rv1Canceled = N.RV1_CANCELED ?? 0; // ✅ NOUVEAU
+
+                    const rv2Planned = N.RV2_PLANNED ?? 0;
+                    const rv2Honored = N.RV2_HONORED ?? 0;
+                    const rv2NoShow = N.RV2_NO_SHOW ?? 0;
+                    const rv2Canceled = N.RV2_CANCELED ?? 0;
+                    const rv2Postponed = N.RV2_POSTPONED ?? 0;
+
+
+                    const ventes = N.WON ?? 0;
+
+                    // Approche pragmatique : ce qui reste sur les demandes d’appel
+                    const nurturing = Math.max(
+                      0,
+                      callReq - (rv0Done + rv0NoShow + nonQual)
+                    );
+
+                    return (
+                  <div className="mt-4 space-y-4">
+                    {/* Bloc “Demandes d’appel → RV0” */}
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-[--muted] mb-1">
+                        Bloc “Demandes d’appel → RV0”
                       </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                        {/* ✅ Conversion RV0 faits */}
+                        <KpiBox tone="success">
+                          <KpiRatio
+                            label="RV0 faits / demandes d’appel"
+                            num={rv0Done}
+                            den={callReq}
+                          />
+                        </KpiBox>
+
+                        {/* ❌ No-show */}
+                        <KpiBox tone="danger">
+                          <KpiRatio
+                            label="RV0 no-show / demandes d’appel"
+                            num={rv0NoShow}
+                            den={callReq}
+                            inverse
+                          />
+                        </KpiBox>
+
+                        {/* ⚠️ Non qualifiés */}
+                        <KpiBox tone="warning">
+                          <KpiRatio
+                            label="RV0 non qualifiés / demandes d’appel"
+                            num={rv0NonQual}
+                            den={callReq}
+                            inverse
+                          />
+                        </KpiBox>
+
+                        {/* 🔵 Nurturing */}
+                        <KpiBox tone="info">
+                          <KpiRatio
+                            label="RV0 nurturing / demandes d’appel"
+                            num={N.RV0_NURTURING}
+                            den={N.CALL_REQUESTED}
+                          />
+                        </KpiBox>
+
+                        {/* 💶 Ventes vs demandes d’appel */}
+                        <KpiBox tone="success">
+                          <KpiRatio
+                            label="Ventes / demandes d’appel"
+                            num={ventes}
+                            den={N.CALL_REQUESTED}
+                          />
+                        </KpiBox>
+                      </div>
+                    </div>
+
+                    {/* Bloc “RV0 → RV1 → Ventes” */}
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-[--muted] mb-1">
+                        Bloc “RV0 → RV1 → Ventes”
+                      </div>
+
+                      {/* 🧩 Partie RV1 + Ventes */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 mb-3">
+                        {/* RV1 planifiés */}
+                        <KpiBox tone="info">
+                          <KpiRatio
+                            label="RV1 planifiés / RV0 faits"
+                            num={rv1Planned}
+                            den={rv0Done}
+                          />
+                        </KpiBox>
+
+                        {/* RV1 faits */}
+                        <KpiBox tone="success">
+                          <KpiRatio
+                            label="RV1 faits / RV1 planifiés"
+                            num={rv1Honored}
+                            den={rv1Planned}
+                          />
+                        </KpiBox>
+
+                        {/* RV1 reportés */}
+                        <KpiBox tone="warning">
+                          <KpiRatio
+                            label="RV1 reportés / RV1 planifiés"
+                            num={rv1Postponed}
+                            den={rv1Planned}
+                          />
+                        </KpiBox>
+
+                        {/* RV1 annulés */}
+                        <KpiBox tone="danger">
+                          <KpiRatio
+                            label="RV1 annulés / RV1 planifiés"
+                            num={rv1Canceled}
+                            den={rv1Planned}
+                            inverse
+                          />
+                        </KpiBox>
+
+                        {/* RV1 no-show */}
+                        <KpiBox tone="danger">
+                          <KpiRatio
+                            label="RV1 no-show / RV1 planifiés"
+                            num={rv1NoShow}
+                            den={rv1Planned}
+                            inverse
+                          />
+                        </KpiBox>
+
+                        {/* RV1 non qualifiés */}
+                        <KpiBox tone="warning">
+                          <KpiRatio
+                            label="RV1 non qualifiés / RV1 planifiés"
+                            num={rv1NonQual}
+                            den={rv1Planned}
+                            inverse
+                          />
+                        </KpiBox>
+
+                        {/* RV1 follow-up closer */}
+                        <KpiBox tone="primary">
+                          <KpiRatio
+                            label="RV1 follow-up closer / RV1 faits"
+                            num={N.RV1_FOLLOWUP}
+                            den={rv1Honored}
+                          />
+                        </KpiBox>
+
+                        {/* Ventes / RV1 planifiés */}
+                        <KpiBox tone="success">
+                          <KpiRatio
+                            label="Ventes / RV1 planifiés"
+                            num={ventes}
+                            den={rv1Planned}
+                          />
+                        </KpiBox>
+                      </div>
+
+                      {/* 🧩 Partie RV2 */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                        {/* RV2 planifiés */}
+                        <KpiBox tone="info">
+                          <KpiRatio
+                            label="RV2 planifiés / RV1 faits"
+                            num={rv2Planned}
+                            den={rv1Honored}
+                          />
+                        </KpiBox>
+
+                        {/* RV2 faits */}
+                        <KpiBox tone="success">
+                          <KpiRatio
+                            label="RV2 faits / RV2 planifiés"
+                            num={rv2Honored}
+                            den={rv2Planned}
+                          />
+                        </KpiBox>
+
+                        {/* RV2 no-show */}
+                        <KpiBox tone="danger">
+                          <KpiRatio
+                            label="RV2 no-show / RV2 planifiés"
+                            num={rv2NoShow}
+                            den={rv2Planned}
+                            inverse
+                          />
+                        </KpiBox>
+
+                        {/* RV2 annulés */}
+                        <KpiBox tone="danger">
+                          <KpiRatio
+                            label="RV2 annulés / RV2 planifiés"
+                            num={rv2Canceled}
+                            den={rv2Planned}
+                            inverse
+                          />
+                        </KpiBox>
+
+                        {/* RV2 reportés */}
+                        <KpiBox tone="warning">
+                          <KpiRatio
+                            label="RV2 reportés / RV2 planifiés"
+                            num={rv2Postponed}
+                            den={rv2Planned}
+                          />
+                        </KpiBox>
+
+                        {/* Ventes / RV2 planifiés */}
+                        <KpiBox tone="success">
+                          <KpiRatio
+                            label="Ventes / RV2 planifiés"
+                            num={ventes}
+                            den={rv2Planned}
+                          />
+                        </KpiBox>
+
+                        {/* Ventes / RV2 faits */}
+                        <KpiBox tone="success">
+                          <KpiRatio
+                            label="Ventes / RV2 faits"
+                            num={ventes}
+                            den={rv2Honored}
+                          />
+                        </KpiBox>
+
+                        {/* Ventes / RV1 faits (global) */}
+                        <KpiBox tone="muted">
+                          <KpiRatio
+                            label="Ventes / RV1 faits"
+                            num={ventes}
+                            den={rv1Honored}
+                          />
+                        </KpiBox>
+                      </div>
+                    </div>
+                  </div>
+                  
                     );
                   })()}
+
                 </motion.div>
               )}
             </AnimatePresence>
@@ -2623,7 +2919,10 @@ async function fetchStageSeriesAny(stage: string, params: any) {
             </div>
           </div>
 
+          
+
           {/* ===== Charts Deck ===== */}
+          
           <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
             {/* Leads reçus */}
             <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
@@ -3006,143 +3305,56 @@ async function fetchStageSeriesAny(stage: string, params: any) {
               </div>
             </div>
 
-            {/* Calls total vs answered */}
+            {/* RV0 faits par jour */}
             <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
               <div className="flex items-center justify-between">
-                <div className="font-medium">
-                  Appels passés & répondus par jour
-                </div>
+                <div className="font-medium">RV0 faits par jour</div>
                 <div className="text-xs text-[--muted]">
-                  {(mCallsTotal?.total ?? 0).toLocaleString(
-                    "fr-FR"
-                  )}{" "}
-                  /{" "}
-                  {(mCallsAnswered?.total ?? 0).toLocaleString(
-                    "fr-FR"
-                  )}
+                  {(rv0Daily?.total ?? 0).toLocaleString("fr-FR")} au total
                 </div>
               </div>
+
               <div className="h-64 mt-2">
-                {mCallsTotal?.byDay?.length ||
-                mCallsAnswered?.byDay?.length ? (
-                  <ResponsiveContainer
-                    width="100%"
-                    height="100%"
-                  >
+                {rv0Daily?.byDay?.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={(mCallsTotal?.byDay || []).map(
-                        (d) => {
-                          const label = new Date(
-                            d.day
-                          ).toLocaleDateString("fr-FR");
-                          const answered =
-                            mCallsAnswered?.byDay?.find(
-                              (x) =>
-                                new Date(
-                                  x.day
-                                ).toDateString() ===
-                                new Date(
-                                  d.day
-                                ).toDateString()
-                            )?.count ?? 0;
-                          return {
-                            day: label,
-                            total: d.count,
-                            answered,
-                          };
-                        }
-                      )}
-                      margin={{
-                        left: 8,
-                        right: 8,
-                        top: 10,
-                        bottom: 0,
-                      }}
+                      data={rv0Daily.byDay.map((d) => ({
+                        day: new Date(d.day).toLocaleDateString("fr-FR"),
+                        count: d.count,
+                      }))}
+                      margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
                     >
                       <defs>
-                        <linearGradient
-                          id="gradCallsTotal"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="#a78bfa"
-                            stopOpacity={0.95}
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="#7c3aed"
-                            stopOpacity={0.7}
-                          />
-                        </linearGradient>
-                        <linearGradient
-                          id="gradCallsAnswered"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="#34d399"
-                            stopOpacity={0.95}
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="#059669"
-                            stopOpacity={0.7}
-                          />
+                        <linearGradient id="gradRv0Done" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#22c55e" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#15803d" stopOpacity={0.7} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke={COLORS.grid}
-                      />
+
+                      <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
                       <XAxis
                         dataKey="day"
-                        tick={{
-                          fill: COLORS.axis,
-                          fontSize: 12,
-                        }}
+                        tick={{ fill: COLORS.axis, fontSize: 12 }}
                       />
                       <YAxis
                         allowDecimals={false}
-                        tick={{
-                          fill: COLORS.axis,
-                          fontSize: 12,
-                        }}
+                        tick={{ fill: COLORS.axis, fontSize: 12 }}
                       />
                       <Tooltip
                         content={
                           <ProTooltip
-                            title="Appels"
+                            title="RV0 faits"
                             valueFormatters={{
-                              total: fmtInt,
-                              answered: fmtInt,
+                              count: (v) => fmtInt(v),
                             }}
                           />
                         }
                       />
-                      <Legend
-                        wrapperStyle={{
-                          color: "#fff",
-                          opacity: 0.8,
-                        }}
-                      />
+                      <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
                       <Bar
-                        name="Passés"
-                        dataKey="total"
-                        fill="url(#gradCallsTotal)"
-                        radius={[8, 8, 0, 0]}
-                        maxBarSize={40}
-                      />
-                      <Bar
-                        name="Répondus"
-                        dataKey="answered"
-                        fill="url(#gradCallsAnswered)"
+                        name="RV0 faits"
+                        dataKey="count"
+                        fill="url(#gradRv0Done)"
                         radius={[8, 8, 0, 0]}
                         maxBarSize={40}
                       />
@@ -3154,11 +3366,12 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                   </div>
                 )}
               </div>
+
               <div className="text-[11px] text-[--muted] mt-2">
-                Basé sur <b>CallAttempt.startedAt</b> et{" "}
-                <b>CallOutcome=ANSWERED</b>.
+                Basé sur les <b>StageEvents RV0_HONORED</b> (date de RDV).
               </div>
             </div>
+
 
             {/* RV0 no-show weekly */}
             <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
@@ -3288,10 +3501,10 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                 <b>date/heure du RDV</b> : chaque barre = lundi → dimanche.
               </div>
               
-              {/* Annulés par jour — RV0/RV1/RV2 en un seul graphe */}
+              {/* Annulés / reportés par jour — RV1 & RV2 */}
               <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
                 <div className="flex items-center justify-between">
-                  <div className="font-medium">Annulés par jour (RV0 / RV1 / RV2)</div>
+                  <div className="font-medium">Annulés / reportés par jour (RV1 & RV2)</div>
                   <div className="text-xs text-[--muted]">
                     {(canceledDaily?.total ?? 0).toLocaleString("fr-FR")} au total
                   </div>
@@ -3301,22 +3514,17 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                   {canceledDaily?.byDay?.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={canceledDaily.byDay}   // ✅ on garde day = 'YYYY-MM-DD' tel quel
+                        data={canceledDaily.byDay}
                         margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
                       >
                         <defs>
-                          {/* RV0 */}
-                          <linearGradient id="gradRv0Canceled" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#fb7185" stopOpacity={0.95} />
-                            <stop offset="100%" stopColor="#be123c" stopOpacity={0.75} />
-                          </linearGradient>
-                          {/* RV1 */}
-                          <linearGradient id="gradRv1Canceled" x1="0" y1="0" x2="0" y2="1">
+                          {/* RV1 : annulé + reporté */}
+                          <linearGradient id="gradRv1Status" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.95} />
                             <stop offset="100%" stopColor="#b45309" stopOpacity={0.75} />
                           </linearGradient>
-                          {/* RV2 */}
-                          <linearGradient id="gradRv2Canceled" x1="0" y1="0" x2="0" y2="1">
+                          {/* RV2 : annulé + reporté */}
+                          <linearGradient id="gradRv2Status" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
                             <stop offset="100%" stopColor="#2563eb" stopOpacity={0.75} />
                           </linearGradient>
@@ -3324,7 +3532,6 @@ async function fetchStageSeriesAny(stage: string, params: any) {
 
                         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
 
-                        {/* ✅ X en catégorie + formattage d’affichage */}
                         <XAxis
                           dataKey="day"
                           type="category"
@@ -3340,46 +3547,34 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                         <Tooltip
                           content={
                             <ProTooltip
-                              title="Annulés"
+                              title="Annulés / reportés"
                               valueFormatters={{
-                                RV0_CANCELED: v => fmtInt(v),
-                                RV1_CANCELED: v => fmtInt(v),
-                                RV2_CANCELED: v => fmtInt(v),
-                                total: v => fmtInt(v),
+                                rv1CanceledPostponed: (v) => fmtInt(v),
+                                rv2CanceledPostponed: (v) => fmtInt(v),
+                                total: (v) => fmtInt(v),
                               }}
                             />
                           }
                         />
                         <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
 
-                        {/* Pile par jour */}
+                        {/* Deux barres côte à côte (pas de stackId) */}
                         <Bar
-                          name="RV0 annulés"
-                          dataKey="RV0_CANCELED"
-                          fill="url(#gradRv0Canceled)"
+                          name="RV1 annulés + reportés"
+                          dataKey="rv1CanceledPostponed"
+                          fill="url(#gradRv1Status)"
                           radius={[8, 8, 0, 0]}
                           maxBarSize={40}
-                          stackId="canceled"
                         />
                         <Bar
-                          name="RV1 annulés"
-                          dataKey="RV1_CANCELED"
-                          fill="url(#gradRv1Canceled)"
+                          name="RV2 annulés + reportés"
+                          dataKey="rv2CanceledPostponed"
+                          fill="url(#gradRv2Status)"
                           radius={[8, 8, 0, 0]}
                           maxBarSize={40}
-                          stackId="canceled"
-                        />
-                        <Bar
-                          name="RV2 annulés"
-                          dataKey="RV2_CANCELED"
-                          fill="url(#gradRv2Canceled)"
-                          radius={[8, 8, 0, 0]}
-                          maxBarSize={40}
-                          stackId="canceled"
                         />
                       </BarChart>
                     </ResponsiveContainer>
-
                   ) : (
                     <div className="flex h-full items-center justify-center text-[--muted] text-sm">
                       Pas de données.
@@ -3388,9 +3583,11 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                 </div>
 
                 <div className="text-[11px] text-[--muted] mt-2">
-                  Agrégation par <b>jour</b> dans le fuseau <b>{tz}</b>. Affiche le total d’annulations par jour (pile RV0, RV1, RV2).
+                  Agrégation quotidienne dans le fuseau <b>{tz}</b> · chaque barre combine
+                  <b> annulés + reportés</b> pour RV1 et RV2.
                 </div>
               </div>
+
             </div>
           </div>
 
@@ -3596,86 +3793,99 @@ async function fetchStageSeriesAny(stage: string, params: any) {
             </div>
 
            {/* Spotlight tables */}
-          <div className="mt-6 grid grid-cols-1 gap-5">
-            {/* Closers */}
-            <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,.22),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
-                    👥 Spotlight Closers
-                  </div>
-                  <div className="text-xs text-[--muted] mt-0.5">
-                    Top 8 closers · vue synthétique : volume · no-show · annulation · closing
-                  </div>
+        <div className="mt-6 grid grid-cols-1 gap-5">
+          {/* Team Closers */}
+          <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,.22),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
+                  👥 Team Closers
                 </div>
-                <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
-                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> KPI fort
-                  <span className="inline-flex h-2 w-2 rounded-full bg-amber-400/70" /> à surveiller
-                  <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> critique
+                <div className="text-xs text-[--muted] mt-0.5">
+                  Top 8 closers · vue synthétique : RV1 / RV2 · no-show · annulation · contrats · ventes
                 </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[1200px]">
-                  <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
-                    <tr>
-                      <th className="py-2.5 px-3 font-medium">Closer</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV1 honorés</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
-                      <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
-                      <th className="py-2.5 px-3 font-medium text-right">% no-show RV1</th> {/* ✅ */}
+              <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
+                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> KPI fort
+                <span className="inline-flex h-2 w-2 rounded-full bg-amber-400/70" /> à surveiller
+                <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> critique
+              </div>
+            </div>
 
-                      <th className="py-2.5 px-3 font-medium text-right">RV2 planifiés</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV2 annulés</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV2 no-show</th>
-                      <th className="py-2.5 px-3 font-medium text-right">% no-show RV2</th> {/* ✅ */}
-                      <th className="py-2.5 px-3 font-medium text-right">% annulation RV2</th>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[1500px]">
+                <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
+                  <tr>
+                    <th className="py-2.5 px-3 font-medium">Closer</th>
 
-                      <th className="py-2.5 px-3 font-medium text-right">Ventes</th>
-                      <th className="py-2.5 px-3 font-medium text-right">CA</th>
-                      <th className="py-2.5 px-3 font-medium text-right">Taux closing</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedClosers.slice(0, 8).map((c, i) => (
-                      <tr
-                        key={c.userId}
-                        className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
-                      >
-                        {/* Closer + rang */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
-                              {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
+                    {/* RV1 */}
+                    <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">RV1 faits</th>
+                    <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
+                    <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">RV1 reportés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">Non qualifiés RV1</th>
+                    <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
+                    <th className="py-2.5 px-3 font-medium text-right">% no-show RV1</th>
+
+                    {/* RV2 */}
+                    <th className="py-2.5 px-3 font-medium text-right">RV2 planifiés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">RV2 faits</th>
+                    <th className="py-2.5 px-3 font-medium text-right">No-show RV2</th>
+                    <th className="py-2.5 px-3 font-medium text-right">RV2 annulés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">RV2 reportés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">% annulation RV2</th>
+                    <th className="py-2.5 px-3 font-medium text-right">% no-show RV2</th>
+
+                    {/* Contrats / ventes */}
+                    <th className="py-2.5 px-3 font-medium text-right">Contrats signés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">Ventes</th>
+                    <th className="py-2.5 px-3 font-medium text-right">CA</th>
+                    <th className="py-2.5 px-3 font-medium text-right">Taux closing</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {sortedClosers.slice(0, 8).map((c, i) => (
+                    <tr
+                      key={c.userId}
+                      className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
+                    >
+                      {/* Closer + rang */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
+                            {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-medium truncate text-[13px]">
+                              {c.name || "—"}
                             </div>
-                            <div className="min-w-0">
-                              <div className="font-medium truncate text-[13px]">
-                                {c.name || "—"}
-                              </div>
-                              <div className="text-[10px] text-[--muted] truncate">
-                                {c.email}
-                              </div>
+                            <div className="text-[10px] text-[--muted] truncate">
+                              {c.email}
                             </div>
                           </div>
-                        </td>
+                        </div>
+                      </td>
 
-                        {/* Volumes RV1 / RV2 & ventes */}
-                        <td className={neutralKpiCell}>{c.rv1Planned ?? 0}</td>
-                        <td className={neutralKpiCell}>{c.rv1Honored ?? 0}</td>
-                        <td className={neutralKpiCell}>{c.rv1Canceled ?? 0}</td>
-                        <td className={neutralKpiCell}>{c.rv1NoShow ?? 0}</td>
+                      {/* RV1 */}
+                      <td className={neutralKpiCell}>{c.rv1Planned ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv1Honored ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv1NoShow ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv1Canceled ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv1Postponed ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv1NotQualified ?? 0}</td>
 
-                        {/* % annulation RV1 */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            <span className={cancelRateBadgeClass(c.rv1CancelRate)}>
-                              {c.rv1CancelRate == null
-                                ? "—"
-                                : `${Math.round((c.rv1CancelRate || 0) * 100)}%`}
-                            </span>
-                          </div>
-                        </td>
+                      {/* % annulation RV1 */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={cancelRateBadgeClass(c.rv1CancelRate)}>
+                            {c.rv1CancelRate == null
+                              ? "—"
+                              : `${Math.round((c.rv1CancelRate || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
 
                       {/* % no-show RV1 */}
                       <td className="py-2.5 px-3">
@@ -3688,73 +3898,78 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                         </div>
                       </td>
 
-                        <td className={neutralKpiCell}>{c.rv2Planned ?? 0}</td>
-                        <td className={neutralKpiCell}>{c.rv2Canceled ?? 0}</td>
-                        <td className={neutralKpiCell}>{c.rv2NoShow ?? 0}</td>
+                      {/* RV2 */}
+                      <td className={neutralKpiCell}>{c.rv2Planned ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv2Honored ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv2NoShow ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv2Canceled ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.rv2Postponed ?? 0}</td>
 
-                        {/* % annulation RV2 */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            <span className={cancelRateBadgeClass(c.rv2CancelRate)}>
-                              {c.rv2CancelRate == null
-                                ? "—"
-                                : `${Math.round((c.rv2CancelRate || 0) * 100)}%`}
-                            </span>
-                          </div>
-                        </td>
+                      {/* % annulation RV2 */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={cancelRateBadgeClass(c.rv2CancelRate)}>
+                            {c.rv2CancelRate == null
+                              ? "—"
+                              : `${Math.round((c.rv2CancelRate || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
 
-                        {/* % no-show RV2 */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            <span className={cancelRateBadgeClass(c.rv2NoShowRate)}>
-                              {c.rv2NoShowRate == null
-                                ? "—"
-                                : `${Math.round((c.rv2NoShowRate || 0) * 100)}%`}
-                            </span>
-                          </div>
-                        </td>
-                        {/* Ventes */}
-                        <td className={neutralKpiCell}>{c.salesClosed ?? 0}</td>
+                      {/* % no-show RV2 */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={cancelRateBadgeClass(c.rv2NoShowRate)}>
+                            {c.rv2NoShowRate == null
+                              ? "—"
+                              : `${Math.round((c.rv2NoShowRate || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
 
-                        {/* CA */}
-                        <td className={neutralKpiCell}>
-                          {(c.revenueTotal || 0).toLocaleString("fr-FR")} €
-                        </td>
+                      {/* Contrats / ventes / CA / closing */}
+                      <td className={neutralKpiCell}>{c.contractsSigned ?? 0}</td>
+                      <td className={neutralKpiCell}>{c.salesClosed ?? 0}</td>
+                      <td className={neutralKpiCell}>
+                        {(c.revenueTotal || 0).toLocaleString("fr-FR")} €
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={positiveRateBadgeClass(c.closingRate)}>
+                            {c.closingRate == null
+                              ? "—"
+                              : `${Math.round((c.closingRate || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
 
-                        {/* Taux de closing */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            <span className={positiveRateBadgeClass(c.closingRate)}>
-                              {c.closingRate == null
-                                ? "—"
-                                : `${Math.round((c.closingRate || 0) * 100)}%`}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {!sortedClosers.length && (
-                      <tr>
-                        <td className="py-6 px-3 text-[--muted] text-sm" colSpan={15}>
-                          Aucune donnée sur la période sélectionnée.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  {!sortedClosers.length && (
+                    <tr>
+                      <td
+                        className="py-6 px-3 text-[--muted] text-sm"
+                        colSpan={20} // 1 closer + 19 colonnes de métriques
+                      >
+                        Aucune donnée sur la période sélectionnée.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
+          </div>
 
             {/* Setters */}
             <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,.18),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
               <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
-                    ☎️ Spotlight Setters
+                    ☎️ Team Setters
                   </div>
-                  <div className="text-xs text-[--muted] mt-0.5">
-                    Vue pipeline : leads → RV1 → ventes · vitesse, no-show & qualité de setting
-                  </div>
+                 <div className="text-xs text-[--muted] mt-0.5">
+                  Vue pipeline : leads → RV1 → ventes · vitesse, no-show & qualité de setting
+                </div>
                 </div>
                 <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
                   <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> TTFC bas
@@ -3768,7 +3983,7 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                   <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
                     <tr>
                       <th className="py-2.5 px-3 font-medium">Setter</th>
-                      <th className="py-2.5 px-3 font-medium text-right">Leads reçus</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Demande d'appel</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 honorés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
@@ -3963,7 +4178,7 @@ async function fetchStageSeriesAny(stage: string, params: any) {
                 <div className="px-4 py-2 text-[10px] text-[--muted] border-t border-white/10">
                   Bandeau scrollable — passe ta
                   souris/ton doigt pour parcourir. Les données
-                  sont calculées sur les <b>WON</b> de la
+                  sont calculées sur les <b>ÉLÈVES INSCRITS</b> de la
                   période.
                 </div>
               </div>
@@ -4260,3 +4475,5 @@ async function fetchStageSeriesAny(stage: string, params: any) {
     </div>
   );
 }
+
+
