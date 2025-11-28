@@ -140,5 +140,4 @@ export async function applyAutoAssignment(opts: {
   }
 
   return res;
-  
 }

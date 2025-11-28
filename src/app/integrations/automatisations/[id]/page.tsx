@@ -32,30 +32,42 @@ type LeadStage = string;
 
 /** Valeurs par défaut (adapter si besoin à ton ENUM Prisma actuel) */
 const STAGE_DEFAULTS: string[] = [
+  // Entrée & appels
   "LEADS_RECEIVED",
   "CALL_REQUESTED",
   "CALL_ATTEMPT",
   "CALL_ANSWERED",
   "SETTER_NO_SHOW",
-  "FOLLOW_UP",
 
+  // Follow-up
+  "FOLLOW_UP",
+  "FOLLOW_UP_CLOSER",
+
+  // RV0
   "RV0_PLANNED",
   "RV0_HONORED",
   "RV0_NO_SHOW",
+  "RV0_POSTPONED",
   "RV0_CANCELED",
+  "RV0_NOT_QUALIFIED",
 
+  // RV1
   "RV1_PLANNED",
   "RV1_HONORED",
   "RV1_NO_SHOW",
   "RV1_POSTPONED",
   "RV1_CANCELED",
+  "RV1_NOT_QUALIFIED",
 
+  // RV2
   "RV2_PLANNED",
   "RV2_HONORED",
   "RV2_NO_SHOW",
   "RV2_POSTPONED",
   "RV2_CANCELED",
 
+  // Sorties
+  "CONTRACT_SIGNED",
   "WON",
   "LOST",
   "NOT_QUALIFIED",
