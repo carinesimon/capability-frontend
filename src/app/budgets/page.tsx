@@ -1906,7 +1906,6 @@ const selectedWeekStartDate =
           )}
         </div>
       </div>
-
       {/* ====== PANNEAU DE FILTRES ====== */}
       <AnimatePresence>
         {filtersOpen && (
