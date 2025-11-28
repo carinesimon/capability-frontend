@@ -12,7 +12,6 @@ type Budget = {
   monthStart: string | null; // ISO
   createdAt: string;
   updatedAt: string;
-  
 };
 
 type SummaryOut = {
@@ -74,8 +73,8 @@ export default function BudgetPanel() {
 
   useEffect(() => { load(); }, []);
 
-  useEffect(() => {
-    // charge un summary pour la plage couverte par la liste de budgets (facultatif)
+    useEffect(() => {
+    // charge un summary pour la plage couverte par la liste de budgets
     async function loadSummary() {
       if (!minWeek || !maxWeek) { setSummary(null); return; }
       try {
@@ -88,7 +87,8 @@ export default function BudgetPanel() {
       }
     }
     loadSummary();
-  }, [minWeek, maxWeek]);
+  }, [minWeek, maxWeek, list]);
+
 
   async function onSave() {
     setMsg(null);
