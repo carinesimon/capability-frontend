@@ -8,6 +8,7 @@ import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 import { currentMonthRange } from "@/lib/date";
 import { motion, AnimatePresence } from "framer-motion";
 // en haut du fichier
+
 /* ================== Types alignés backend ================== */
 type LeadStage =
   | "LEADS_RECEIVED"
@@ -16,24 +17,28 @@ type LeadStage =
   | "CALL_ANSWERED"
   | "SETTER_NO_SHOW"
   | "FOLLOW_UP"
+  | "FOLLOW_UP_CLOSER"
   | "RV0_PLANNED"
   | "RV0_HONORED"
   | "RV0_NO_SHOW"
-  | "RV0_CANCELED"   // 👈 NEW
+  | "RV0_POSTPONED"
+  | "RV0_CANCELED"
   | "RV1_PLANNED"
   | "RV1_HONORED"
   | "RV1_NO_SHOW"
   | "RV1_POSTPONED"
-  | "RV1_CANCELED"   // 👈 NEW
+  | "RV1_CANCELED"
   | "RV2_PLANNED"
   | "RV2_HONORED"
   | "RV2_NO_SHOW"
   | "RV2_POSTPONED"
-  | "RV2_CANCELED"   // 👈 NEW
+  | "RV2_CANCELED"
+  | "RV0_NOT_QUALIFIED"
+  | "RV1_NOT_QUALIFIED"
   | "NOT_QUALIFIED"
   | "LOST"
+  | "CONTRACT_SIGNED"
   | "WON";
-
 
   // Stage côté DTO backend (create-prospect-event.dto.ts)
 type StageDto =
@@ -218,117 +223,148 @@ const STAGE_COLOR: Record<LeadStage, string> = {
   CALL_ATTEMPT: "from-amber-400/70 to-amber-300/30",
   CALL_ANSWERED: "from-indigo-400/70 to-indigo-300/30",
   SETTER_NO_SHOW: "from-rose-400/70 to-rose-300/30",
+
   FOLLOW_UP: "from-teal-400/70 to-teal-300/30",
+  FOLLOW_UP_CLOSER: "from-cyan-400/70 to-cyan-300/30",
 
   RV0_PLANNED: "from-sky-400/70 to-sky-300/30",
   RV0_HONORED: "from-emerald-400/70 to-emerald-300/30",
   RV0_NO_SHOW: "from-rose-400/70 to-rose-300/30",
+  RV0_POSTPONED: "from-amber-400/70 to-amber-300/30",
+  RV0_CANCELED: "from-rose-400/70 to-rose-300/30",
 
   RV1_PLANNED: "from-cyan-400/70 to-cyan-300/30",
   RV1_HONORED: "from-green-400/70 to-green-300/30",
   RV1_NO_SHOW: "from-rose-400/70 to-rose-300/30",
   RV1_POSTPONED: "from-amber-400/70 to-amber-300/30",
+  RV1_CANCELED: "from-rose-400/70 to-rose-300/30",
 
   RV2_PLANNED: "from-sky-400/70 to-sky-300/30",
   RV2_HONORED: "from-green-400/70 to-green-300/30",
   RV2_NO_SHOW: "from-rose-400/70 to-rose-300/30",
-
   RV2_POSTPONED: "from-amber-400/70 to-amber-300/30",
-
-  RV0_CANCELED: "from-rose-400/70 to-rose-300/30",
-  RV1_CANCELED: "from-rose-400/70 to-rose-300/30",
   RV2_CANCELED: "from-rose-400/70 to-rose-300/30",
+
+  RV0_NOT_QUALIFIED: "from-zinc-500/70 to-zinc-400/30",
+  RV1_NOT_QUALIFIED: "from-zinc-500/70 to-zinc-400/30",
 
   NOT_QUALIFIED: "from-zinc-500/70 to-zinc-400/30",
   LOST: "from-red-500/80 to-red-400/40",
+  CONTRACT_SIGNED: "from-amber-500/80 to-amber-400/40",
   WON: "from-emerald-500/80 to-emerald-400/40",
 };
+
 const STAGE_DOT: Record<LeadStage, string> = {
   LEADS_RECEIVED: "bg-blue-400",
   CALL_REQUESTED: "bg-violet-400",
   CALL_ATTEMPT: "bg-amber-400",
   CALL_ANSWERED: "bg-indigo-400",
   SETTER_NO_SHOW: "bg-rose-400",
+
   FOLLOW_UP: "bg-teal-400",
+  FOLLOW_UP_CLOSER: "bg-cyan-400",
 
   RV0_PLANNED: "bg-sky-400",
   RV0_HONORED: "bg-emerald-400",
   RV0_NO_SHOW: "bg-rose-400",
-
+  RV0_POSTPONED: "bg-amber-400",
   RV0_CANCELED: "bg-rose-400",
-  RV1_CANCELED: "bg-rose-400",
-  RV2_CANCELED: "bg-rose-400",
 
   RV1_PLANNED: "bg-cyan-400",
   RV1_HONORED: "bg-green-400",
   RV1_NO_SHOW: "bg-rose-400",
   RV1_POSTPONED: "bg-amber-400",
+  RV1_CANCELED: "bg-rose-400",
 
   RV2_PLANNED: "bg-sky-400",
   RV2_HONORED: "bg-green-400",
   RV2_NO_SHOW: "bg-rose-400",
-
   RV2_POSTPONED: "bg-amber-400",
+  RV2_CANCELED: "bg-rose-400",
+
+  RV0_NOT_QUALIFIED: "bg-zinc-400",
+  RV1_NOT_QUALIFIED: "bg-zinc-400",
 
   NOT_QUALIFIED: "bg-zinc-400",
   LOST: "bg-red-500",
+  CONTRACT_SIGNED: "bg-amber-500",
   WON: "bg-emerald-500",
 };
 
 /* ========= Mapping stage → type d’événement à compter ========= */
-const STAGE_TO_EVENT: Record<LeadStage, string> = {
+/* Actuellement non utilisé dans ce fichier, on le laisse en Partial pour ne pas casser le typage. */
+const STAGE_TO_EVENT: Partial<Record<LeadStage, string>> = {
   LEADS_RECEIVED: "LEAD_CREATED",
   CALL_REQUESTED: "CALL_REQUESTED",
   CALL_ATTEMPT: "CALL_ATTEMPT",
   CALL_ANSWERED: "CALL_ANSWERED",
   SETTER_NO_SHOW: "SETTER_NO_SHOW",
   FOLLOW_UP: "FOLLOW_UP",
+
   RV0_PLANNED: "APPOINTMENT_PLANNED_RV0",
   RV0_HONORED: "APPOINTMENT_HONORED_RV0",
   RV0_NO_SHOW: "APPOINTMENT_NOSHOW_RV0",
+  RV0_CANCELED: "APPOINTMENT_CANCELED_RV0",
+
   RV1_PLANNED: "APPOINTMENT_PLANNED_RV1",
   RV1_HONORED: "APPOINTMENT_HONORED_RV1",
   RV1_NO_SHOW: "APPOINTMENT_NOSHOW_RV1",
   RV1_POSTPONED: "APPOINTMENT_POSTPONED_RV1",
+  RV1_CANCELED: "APPOINTMENT_CANCELED_RV1",
+
   RV2_PLANNED: "APPOINTMENT_PLANNED_RV2",
   RV2_HONORED: "APPOINTMENT_HONORED_RV2",
   RV2_NO_SHOW: "APPOINTMENT_NOSHOW_RV2",
   RV2_POSTPONED: "APPOINTMENT_POSTPONED_RV2",
-  RV0_CANCELED: "APPOINTMENT_CANCELED_RV0",
-  RV1_CANCELED: "APPOINTMENT_CANCELED_RV1",
   RV2_CANCELED: "APPOINTMENT_CANCELED_RV2",
+
   NOT_QUALIFIED: "NOT_QUALIFIED",
   LOST: "LOST",
   WON: "WON",
+  // Tu pourras compléter pour FOLLOW_UP_CLOSER / CONTRACT_SIGNED si tu crées des events dédiés côté backend.
 };
 
 /* ================== Colonnes par défaut (sans compteurs) ================== */
 const DEFAULT_COLUMNS: ColumnConfig[] = [
-  { id: "c_leads_rcv", order: 0, enabled: true, label: "Leads reçus", stage: "LEADS_RECEIVED" },
-  { id: "c_call_req", order: 1, enabled: true, label: "Demandes d’appel", stage: "CALL_REQUESTED" },
-  { id: "c_call_att", order: 2, enabled: true, label: "Appels passés", stage: "CALL_ATTEMPT" },
-  { id: "c_call_ans", order: 3, enabled: true, label: "Appels répondus", stage: "CALL_ANSWERED" },
-  { id: "c_ns_setter", order: 4, enabled: true, label: "No-show Setter", stage: "SETTER_NO_SHOW" },
-  { id: "c_followup", order: 5, enabled: true, label: "Follow Up (Financement)", stage: "FOLLOW_UP" },
-  { id: "c_rv0_p", order: 10, enabled: true, label: "RV0 planifiés", stage: "RV0_PLANNED" },
-  { id: "c_rv0_h", order: 11, enabled: true, label: "RV0 honorés", stage: "RV0_HONORED" },
-  { id: "c_rv0_ns", order: 12, enabled: true, label: "RV0 no-show", stage: "RV0_NO_SHOW" },
-  { id: "c_rv0_can",  order: 13, enabled: true, label: "RV0 annulés",   stage: "RV0_CANCELED" }, // 👈 NEW
+  { id: "c_leads_rcv",  order: 0,  enabled: true,  label: "Leads reçus",              stage: "LEADS_RECEIVED" },
+  { id: "c_call_req",   order: 1,  enabled: true,  label: "Demandes d’appel",         stage: "CALL_REQUESTED" },
+  { id: "c_call_att",   order: 2,  enabled: true,  label: "Appels passés",            stage: "CALL_ATTEMPT" },
+  { id: "c_call_ans",   order: 3,  enabled: true,  label: "Appels répondus",          stage: "CALL_ANSWERED" },
+  { id: "c_ns_setter",  order: 4,  enabled: true,  label: "No-show Setter",           stage: "SETTER_NO_SHOW" },
+  { id: "c_followup",   order: 5,  enabled: true,  label: "Follow Up (Setter/RV0)",   stage: "FOLLOW_UP" },
+  { id: "c_followup_cl",order: 6,  enabled: true,  label: "Follow Up Closer",         stage: "FOLLOW_UP_CLOSER" },
 
-  { id: "c_rv1_p", order: 20, enabled: true, label: "RV1 planifiés", stage: "RV1_PLANNED" },
-  { id: "c_rv1_h", order: 21, enabled: true, label: "RV1 honorés", stage: "RV1_HONORED" },
-  { id: "c_rv1_ns", order: 22, enabled: true, label: "RV1 no-show", stage: "RV1_NO_SHOW" },
-  { id: "c_rv1_post", order: 23, enabled: true, label: "RV1 reportés", stage: "RV1_POSTPONED" },
-  { id: "c_rv1_can",  order: 24, enabled: true, label: "RV1 annulés",    stage: "RV1_CANCELED" }, // 👈 NEW
+  // RV0
+  { id: "c_rv0_p",      order: 10, enabled: true,  label: "RV0 planifiés",            stage: "RV0_PLANNED" },
+  { id: "c_rv0_h",      order: 11, enabled: true,  label: "RV0 honorés",              stage: "RV0_HONORED" },
+  { id: "c_rv0_ns",     order: 12, enabled: true,  label: "RV0 no-show",              stage: "RV0_NO_SHOW" },
+  { id: "c_rv0_post",   order: 13, enabled: false, label: "RV0 reportés",             stage: "RV0_POSTPONED" },
+  { id: "c_rv0_can",    order: 14, enabled: false, label: "RV0 annulés",              stage: "RV0_CANCELED" },
+  { id: "c_rv0_notq",   order: 15, enabled: false, label: "RV0 non qualifiés",        stage: "RV0_NOT_QUALIFIED" },
 
-  { id: "c_rv2_p", order: 30, enabled: true, label: "RV2 planifiés", stage: "RV2_PLANNED" },
-  { id: "c_rv2_h", order: 31, enabled: true, label: "RV2 honorés", stage: "RV2_HONORED" },
-  { id: "c_rv2_post", order: 32, enabled: true, label: "RV2 reportés", stage: "RV2_POSTPONED" },
-  { id: "c_rv2_can",  order: 33, enabled: true, label: "RV2 annulés",    stage: "RV2_CANCELED" }, // 👈 NEW
-  { id: "c_notq", order: 90, enabled: true, label: "Non qualifiés", stage: "NOT_QUALIFIED" },
-  { id: "c_lost", order: 91, enabled: true, label: "Perdus", stage: "LOST" },
-  { id: "c_won", order: 99, enabled: true, label: "Ventes (WON)", stage: "WON" },
+  // RV1
+  { id: "c_rv1_p",      order: 20, enabled: true,  label: "RV1 planifiés",            stage: "RV1_PLANNED" },
+  { id: "c_rv1_h",      order: 21, enabled: true,  label: "RV1 honorés",              stage: "RV1_HONORED" },
+  { id: "c_rv1_ns",     order: 22, enabled: true,  label: "RV1 no-show",              stage: "RV1_NO_SHOW" },
+  { id: "c_rv1_post",   order: 23, enabled: false, label: "RV1 reportés",             stage: "RV1_POSTPONED" },
+  { id: "c_rv1_can",    order: 24, enabled: true,  label: "RV1 annulés",              stage: "RV1_CANCELED" },
+  { id: "c_rv1_notq",   order: 25, enabled: false, label: "RV1 non qualifiés",        stage: "RV1_NOT_QUALIFIED" },
+
+  // RV2
+  { id: "c_rv2_p",      order: 30, enabled: false, label: "RV2 planifiés",            stage: "RV2_PLANNED" },
+  { id: "c_rv2_h",      order: 31, enabled: false, label: "RV2 honorés",              stage: "RV2_HONORED" },
+  { id: "c_rv2_ns",     order: 32, enabled: false, label: "RV2 no-show",              stage: "RV2_NO_SHOW" },
+  { id: "c_rv2_post",   order: 33, enabled: false, label: "RV2 reportés",             stage: "RV2_POSTPONED" },
+  { id: "c_rv2_can",    order: 34, enabled: false, label: "RV2 annulés",              stage: "RV2_CANCELED" },
+
+  // Sorties & statuts finaux
+  { id: "c_rv_notq",    order: 80, enabled: false, label: "Non qualifiés RV0/RV1",    stage: "NOT_QUALIFIED" },
+  { id: "c_notq",       order: 81, enabled: true,  label: "Non qualifiés (global)",   stage: "NOT_QUALIFIED" },
+  { id: "c_lost",       order: 90, enabled: true,  label: "Perdus",                   stage: "LOST" },
+  { id: "c_contract",   order: 95, enabled: false, label: "Contrat signé",            stage: "CONTRACT_SIGNED" },
+  { id: "c_won",        order: 99, enabled: true,  label: "Ventes (WON)",             stage: "WON" },
 ];
+
 const RDV_ANNULES_COLUMN: ColumnConfig = {
   id: "c_rdv_annules",
   order: 24,
@@ -1313,9 +1349,13 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                         <select
                           className="input"
                           value={c.stage ?? ""}
-                          onChange={(e)=>{
+                          onChange={(e) => {
                             const v = e.target.value || null;
-                            setManageDraft(manageDraft.map(x => x.id === c.id ? { ...x, stage: (v ? (v as LeadStage) : null) } : x));
+                            setManageDraft(
+                              manageDraft.map(x =>
+                                x.id === c.id ? { ...x, stage: (v ? (v as LeadStage) : null) } : x,
+                              ),
+                            );
                           }}
                         >
                           <option value="">— Colonne libre (sans mapping) —</option>
@@ -1327,13 +1367,16 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                             <option value="CALL_ANSWERED">CALL_ANSWERED</option>
                             <option value="SETTER_NO_SHOW">SETTER_NO_SHOW</option>
                             <option value="FOLLOW_UP">FOLLOW_UP</option>
+                            <option value="FOLLOW_UP_CLOSER">FOLLOW_UP_CLOSER</option>
                           </optgroup>
 
                           <optgroup label="RV0">
                             <option value="RV0_PLANNED">RV0_PLANNED</option>
                             <option value="RV0_HONORED">RV0_HONORED</option>
                             <option value="RV0_NO_SHOW">RV0_NO_SHOW</option>
+                            <option value="RV0_POSTPONED">RV0_POSTPONED</option>
                             <option value="RV0_CANCELED">RV0_CANCELED</option>
+                            <option value="RV0_NOT_QUALIFIED">RV0_NOT_QUALIFIED</option>
                           </optgroup>
 
                           <optgroup label="RV1">
@@ -1342,6 +1385,7 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                             <option value="RV1_NO_SHOW">RV1_NO_SHOW</option>
                             <option value="RV1_POSTPONED">RV1_POSTPONED</option>
                             <option value="RV1_CANCELED">RV1_CANCELED</option>
+                            <option value="RV1_NOT_QUALIFIED">RV1_NOT_QUALIFIED</option>
                           </optgroup>
 
                           <optgroup label="RV2">
@@ -1355,9 +1399,11 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                           <optgroup label="Sorties">
                             <option value="NOT_QUALIFIED">NOT_QUALIFIED</option>
                             <option value="LOST">LOST</option>
+                            <option value="CONTRACT_SIGNED">CONTRACT_SIGNED</option>
                             <option value="WON">WON</option>
                           </optgroup>
                         </select>
+
                       </div>
 
                       <div className="col-span-2">
@@ -1605,4 +1651,3 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
     </div>
   );
 }
-
