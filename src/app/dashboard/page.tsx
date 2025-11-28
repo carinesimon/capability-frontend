@@ -1023,13 +1023,53 @@ export default function DashboardPage() {
     [range.to]
   );
 
-  // Hook funnel (événements d’entrée de stage)
-  const {
-    data: totals = {},
-    loading: funnelLoading,
-    error: funnelError,
-  } = useFunnelMetrics(fromDate, toDate, tz);
+  // ========= FUNNEL METRICS (pour les tuiles + Funnel) =========
+const { data: funnelRaw = {}, loading: funnelLoading, error: funnelError } =
+  useFunnelMetrics(fromDate, toDate, tz);
 
+const totals = normalizeTotals(
+  funnelRaw as Record<string, number | undefined>
+);
+
+const funnelData: FunnelProps["data"] = {
+  // Top funnel
+  leads: totals.LEADS_RECEIVED,
+  callRequests: totals.CALL_REQUESTED,
+  callsTotal: totals.CALL_ATTEMPT,
+  callsAnswered: totals.CALL_ANSWERED,
+  setterNoShow: totals.SETTER_NO_SHOW,
+
+  // RV0
+  rv0P: totals.RV0_PLANNED,
+  rv0H: totals.RV0_HONORED,
+  rv0NS: totals.RV0_NO_SHOW,
+  rv0C: totals.RV0_CANCELED,
+  rv0NQ:
+    ((totals as any).RV0_NOT_QUALIFIED_1 || 0) +
+    ((totals as any).RV0_NOT_QUALIFIED_2 || 0),
+  rv0Nurturing: (totals as any).RV0_NURTURING || 0,
+
+  // RV1
+  rv1P: totals.RV1_PLANNED,
+  rv1H: totals.RV1_HONORED,
+  rv1NS: totals.RV1_NO_SHOW,
+  rv1Postponed: totals.RV1_POSTPONED ?? 0,
+  rv1FollowupCloser: (totals as any).RV1_FOLLOWUP || 0,
+  rv1C: totals.RV1_CANCELED,
+  rv1NQ: totals.RV1_NOT_QUALIFIED ?? 0,
+
+  // RV2
+  rv2P: totals.RV2_PLANNED,
+  rv2H: totals.RV2_HONORED,
+  rv2NS: totals.RV2_NO_SHOW,
+  rv2C: totals.RV2_CANCELED,
+  rv2Postponed: totals.RV2_POSTPONED ?? 0,
+
+  // Ventes
+  won: totals.WON,
+};
+
+  
   // Période précédente (même durée)
   const { prevFromISO, prevToISO } = useMemo(() => {
     if (!range.from || !range.to)
@@ -1082,6 +1122,7 @@ export default function DashboardPage() {
   const [rv0NsWeekly, setRv0NsWeekly] = useState<Rv0NsWeek[]>(
     []
   );
+
 
   // Drill modal
   const [drillOpen, setDrillOpen] = useState(false);
@@ -1720,10 +1761,8 @@ useEffect(() => {
     normalizedTotals.LEADS_RECEIVED ||
     (summary?.totals?.leads ?? 0);
 
-  const kpiRv1Honored =
-    summary?.totals?.rv1Honored ??
-    normalizedTotals.RV1_HONORED ??
-    0;
+  const kpiRv1Honored = funnelData.rv1H ?? 0;
+
 
   // Global rates (affichage)
   const globalSetterQual = useMemo(() => {
@@ -2168,7 +2207,7 @@ function KpiBox({
 
     case "rv1Honored":
       return openAppointmentsDrill({
-        title: "RV1 honorés (détail)",
+        title: "RV1 Fait (détail)",
         type: "RV1",
         status: "HONORED",
       });
@@ -2406,17 +2445,16 @@ function KpiBox({
               }
             >
               <div className="text-xs uppercase tracking-wide text-[--muted]">
-                RV1 honorés
+                RV1 Fait
               </div>
               <div className="mt-2 text-2xl font-semibold">
-                {fmtInt(kpiRv1Honored)}
+                {fmtInt(kpiRv1Honored) } 
               </div>
-              <div className="text[10px] text-[--muted] mt-1">
+              <div className="text-[10px] text-[--muted] mt-1">
                 Clique pour détails par lead
               </div>
-            </motion.div>
+            </motion.div> 
           </div>
-
           {/* ===== Pipeline insights ===== */}
           <div className="relative">
             <div className="pointer-events-none absolute inset-0 -z-10">
@@ -2603,7 +2641,7 @@ function KpiBox({
                     const N = normalizeTotals(totals as any);
                     return (
                       <Funnel
-                        data={{
+                        data={funnelData} /*{{
                           leads:
                             (leadsRcv?.total ?? 0) ||
                             N.LEADS_RECEIVED,
@@ -2637,7 +2675,7 @@ function KpiBox({
 
                           won: N.WON,
                           
-                        }}
+                        }}*/
                         onCardClick={onFunnelCardClick}
                       />
                     );
@@ -3654,7 +3692,7 @@ function KpiBox({
                         </div>
                         <div className="text-[10px] text-[--muted]">
                           {sortedClosers[0].salesClosed} ventes •{" "}
-                          {sortedClosers[0].rv1Honored} RV1 honorés
+                          {sortedClosers[0].rv1Honored} RV1 Fait
                         </div>
                       </div>
                     </div>
@@ -3985,7 +4023,7 @@ function KpiBox({
                       <th className="py-2.5 px-3 font-medium">Setter</th>
                       <th className="py-2.5 px-3 font-medium text-right">Demande d'appel</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV1 honorés</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 Fait</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
                       <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
@@ -4475,5 +4513,4 @@ function KpiBox({
     </div>
   );
 }
-
 
