@@ -1748,7 +1748,7 @@ const selectedWeekStartDate =
               </div>
 
               {/* Tableau hebdo pour la comptable */}
-              {supportsBudgetPost && (
+            
                 <div className="card">
                   <div className="mb-2 font-medium">
                     Vue hebdomadaire – Budgets & résultats financiers
@@ -1893,7 +1893,7 @@ const selectedWeekStartDate =
                     </table>
                   </div>
                 </div>
-              )}
+              
 
               <DrillModal
                 title={drillTitle}
@@ -1906,6 +1906,7 @@ const selectedWeekStartDate =
           )}
         </div>
       </div>
+
       {/* ====== PANNEAU DE FILTRES ====== */}
       <AnimatePresence>
         {filtersOpen && (
