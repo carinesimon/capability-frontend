@@ -18,32 +18,25 @@ import BudgetPanel from "@/components/BudgetPanel";
 
 /* =============================================================================
    Helpers GET/POST (silencieux) pour tester plusieurs routes sans polluer console
+   → Utilise l'instance Axios `api` pour respecter le baseURL + auth
 ============================================================================= */
 async function tryGet<T>(
   candidates: Array<{ url: string; params?: Record<string, any> }>,
   fallback: T
 ): Promise<{ data: T; hit: string | null }> {
   for (const c of candidates) {
-    const qs = c.params
-      ? `?${new URLSearchParams(
-          Object.entries(c.params).filter(([, v]) => v != null) as any
-        )}`
-      : "";
     try {
-      const res = await fetch(`${c.url}${qs}`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-        keepalive: true,
+      const res = await api.get(c.url, {
+        params: c.params,
       });
-      if (res.ok) {
-        const txt = await res.text();
-        const json = txt ? JSON.parse(txt) : null;
-        return { data: (json ?? fallback) as T, hit: c.url };
-      }
-      if (res.status === 404) continue;
-    } catch {
-      // ignore et essaie le suivant
+      // on considère que si ça répond 2xx, c'est bon
+      return { data: (res.data ?? fallback) as T, hit: c.url };
+    } catch (err: any) {
+      const status = err?.response?.status;
+      // si la route n'existe pas, on teste le candidat suivant
+      if (status === 404) continue;
+      // pour les autres erreurs (401, 500, etc.), on n'arrête pas l'app,
+      // mais on laisse la boucle essayer le candidat suivant
     }
   }
   return { data: fallback, hit: null };
@@ -54,16 +47,17 @@ async function tryPost(
 ): Promise<{ ok: boolean; hit: string | null }> {
   for (const c of candidates) {
     try {
-      const res = await fetch(c.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(c.body ?? {}),
-        keepalive: true,
-      });
-      if (res.ok) return { ok: true, hit: c.url };
-      if (res.status === 404) continue;
-    } catch {
-      // ignore et essaie le suivant
+      const res = await api.post(c.url, c.body ?? {});
+      if (res.status >= 200 && res.status < 300) {
+        return { ok: true, hit: c.url };
+      }
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404) {
+        // on teste le fallback suivant
+        continue;
+      }
+      // autres erreurs : on essaie quand même le candidat suivant
     }
   }
   return { ok: false, hit: null };
@@ -1748,7 +1742,7 @@ const selectedWeekStartDate =
               </div>
 
               {/* Tableau hebdo pour la comptable */}
-            
+              {supportsBudgetPost && (
                 <div className="card">
                   <div className="mb-2 font-medium">
                     Vue hebdomadaire – Budgets & résultats financiers
@@ -1893,7 +1887,7 @@ const selectedWeekStartDate =
                     </table>
                   </div>
                 </div>
-              
+              )}
 
               <DrillModal
                 title={drillTitle}
