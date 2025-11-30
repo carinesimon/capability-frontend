@@ -125,6 +125,10 @@ type LeadsReceivedOut = {
   byDay?: Array<{ day: string; count: number }>;
 };
 
+type CallRequestsOut = {
+  total: number;
+  byDay?: Array<{ day: string; count: number }>;
+};
 
 /** ---------- Utils ---------- */
 const fmtInt = (n: number) => Math.round(n).toLocaleString("fr-FR");
@@ -378,6 +382,7 @@ export default function BudgetPage() {
   const [ops, setOps] = useState<WeeklyOpsRow[]>([]);
   const [weeklySales, setWeeklySales] = useState<WeeklySales[]>([]);
   const [leadsTotal, setLeadsTotal] = useState<number>(0);
+  const [callRequestsTotal, setCallRequestsTotal] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -514,6 +519,37 @@ export default function BudgetPage() {
         if (!cancelled) {
           setLeadsTotal(leadsTotalComputed);
         }
+
+        // ====== Demandes d’appel sur la période =====
+        const callReqGet = await tryGet<any>(
+          [
+            {
+              url: "/reporting/call-requests",
+              params: { from: fromISO, to: toISO },
+            },
+            {
+              url: "/metrics/call-requests-by-day",
+              params: { from: fromISO, to: toISO },
+            },
+          ],
+          { total: 0 }
+        );
+
+        const CR = callReqGet.data as CallRequestsOut | any;
+
+        const callRequestsTotalComputed =
+          (typeof CR?.total === "number" ? CR.total : 0) ||
+          (Array.isArray(CR?.byDay)
+            ? CR.byDay.reduce(
+                (s: number, d: any) => s + (d.count || d.value || 0),
+                0
+              )
+            : 0);
+
+        if (!cancelled) {
+          setCallRequestsTotal(callRequestsTotalComputed);
+        }
+
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Erreur de chargement");
       } finally {
@@ -526,7 +562,7 @@ export default function BudgetPage() {
       cancelled = true;
     };
   }, [authChecked, authError, fromISO, toISO]);
-
+  
   /** -------- Drill helpers -------- */
   async function openAppointmentsDrill(params: {
     title: string;
@@ -1168,7 +1204,7 @@ export default function BudgetPage() {
   );
 
     // On considère les leads comme des demandes d'appel sur cette vue
-  const totalCallRequests = totalLeads;
+  const totalCallRequests = callRequestsTotal;
 
   const rawSpendTotal = series.reduce(
     (n, x) => n + (x.spend || 0),
