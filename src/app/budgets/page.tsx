@@ -1167,6 +1167,9 @@ export default function BudgetPage() {
     0
   );
 
+    // On considère les leads comme des demandes d'appel sur cette vue
+  const totalCallRequests = totalLeads;
+
   const rawSpendTotal = series.reduce(
     (n, x) => n + (x.spend || 0),
     0
@@ -1207,6 +1210,11 @@ const selectedWeekStartDate =
 
   // ✅ CA encaissé pour la semaine filtrée (si tu veux t’en servir plus tard)
   const totalCashIn = selectedBudgetRow?.caEncaisse ?? 0;
+
+    // ✅ Coût / demande d’appel = budget / nb de demandes
+  const costPerCallRequest =
+    totalCallRequests > 0 ? totalBudget / totalCallRequests : null;
+
 
   // ✅ Totaux ops pour la période (RV0 faits, RV1 planifiés, RV1 faits)
   const opsTotals = useMemo(
@@ -1606,6 +1614,16 @@ const selectedWeekStartDate =
                   </div>
                 </div>
 
+                {/* Demandes d’appel + coût moyen */}
+                <div className="card">
+                  <div className="text-[10px] uppercase tracking-wide text-[--muted]">
+                    Demandes d’appel (période)
+                  </div>
+                  <div className="mt-1 text-2xl font-semibold">
+                    {fmtInt(totalCallRequests)}
+                  </div>
+                </div>
+
                 {/* CA vendu (CRM) */}
                 <div
                   className="card cursor-pointer"
@@ -1679,6 +1697,19 @@ const selectedWeekStartDate =
                   </div>
                   <div className="mt-1 text-xl font-semibold">
                     {fmtMaybeEUR(cplGlobal)}
+                  </div>
+                </div>
+
+                {/* Coût par demande d’appel */}
+                <div className="card">
+                  <div className="text-[10px] uppercase tracking-wide text-[--muted]">
+                    Coût / demande d’appel
+                  </div>
+                  <div className="mt-1 text-2xl font-semibold">
+                    {fmtMaybeEUR(costPerCallRequest)}
+                  </div>
+                  <div className="mt-1 text-[11px] text-[--muted]">
+                    Basé sur le budget pub et le nombre total de demandes d’appel.
                   </div>
                 </div>
 
