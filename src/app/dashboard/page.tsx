@@ -1763,6 +1763,8 @@ useEffect(() => {
 
   const kpiRv1Honored = funnelData.rv1H ?? 0;
 
+// ➕ Nombre total de ventes (deals WON)
+const kpiSales = summary?.totals?.salesCount ?? 0;
 
   // Global rates (affichage)
   const globalSetterQual = useMemo(() => {
@@ -1842,6 +1844,7 @@ useEffect(() => {
   const kpiRv1HonoredPrev =
     summaryPrev?.totals?.rv1Honored ?? 0;
 
+const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
 
   type AnnulPostDailyRow = {
     day: string;
@@ -2436,6 +2439,31 @@ function KpiBox({
               </div>
             </motion.div>*/}
 
+             {/* ➕ KPI Ventes */}
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="card cursor-pointer"
+                onClick={() => onFunnelCardClick("wonCount")}
+              >
+                <div className="text-xs uppercase tracking-wide text-[--muted]">
+                  Ventes
+                </div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {fmtInt(kpiSales)}{" "}
+                  {comparePrev && (
+                    <Trend
+                      curr={kpiSales}
+                      prev={kpiSalesPrev}
+                    />
+                  )}
+                </div>
+                <div className="text-xs text-[--muted] mt-1">
+                  Nombre total de deals passés en <b>WON</b>.
+                  Clique pour voir le détail.
+                </div>
+              </motion.div>
+
             <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2453,8 +2481,9 @@ function KpiBox({
               <div className="text-[10px] text-[--muted] mt-1">
                 Clique pour détails par lead
               </div>
-            </motion.div> 
+            </motion.div>
           </div>
+          
           {/* ===== Pipeline insights ===== */}
           <div className="relative">
             <div className="pointer-events-none absolute inset-0 -z-10">
@@ -2716,224 +2745,261 @@ function KpiBox({
                     );
 
                     return (
-                  <div className="mt-4 space-y-4">
-                    {/* Bloc “Demandes d’appel → RV0” */}
-                    <div>
-                      <div className="text-[11px] uppercase tracking-wide text-[--muted] mb-1">
-                        Bloc “Demandes d’appel → RV0”
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                        {/* ✅ Conversion RV0 faits */}
-                        <KpiBox tone="success">
-                          <KpiRatio
-                            label="RV0 faits / demandes d’appel"
-                            num={rv0Done}
-                            den={callReq}
-                          />
-                        </KpiBox>
+                    <div className="mt-4 space-y-4">
+                          {/* 🧊 BLOC 1 — Demandes d’appel → RV0 (top of funnel, ton “analyse”) */}
+                          <div className="rounded-3xl border border-white/12 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.12),rgba(9,12,19,0.96))] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-sky-400/80 via-sky-300/40 to-transparent" />
+                                  <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
+                                    Bloc 1 · Demandes d’appel → RV0
+                                  </div>
+                                </div>
+                                <div className="text-[11px] text-[--muted]">
+                                  Comment les demandes d’appel se convertissent en premiers RDV (RV0).
+                                </div>
+                              </div>
+                              <div className="hidden md:block text-[10px] text-[--muted]">
+                                Objectif : maximiser les RV0 faits et limiter les pertes dès l’entrée du pipeline.
+                              </div>
+                            </div>
 
-                        {/* ❌ No-show */}
-                        <KpiBox tone="danger">
-                          <KpiRatio
-                            label="RV0 no-show / demandes d’appel"
-                            num={rv0NoShow}
-                            den={callReq}
-                            inverse
-                          />
-                        </KpiBox>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV0 faits / demandes d’appel"
+                                  num={rv0Done}
+                                  den={callReq}
+                                />
+                              </KpiBox>
 
-                        {/* ⚠️ Non qualifiés */}
-                        <KpiBox tone="warning">
-                          <KpiRatio
-                            label="RV0 non qualifiés / demandes d’appel"
-                            num={rv0NonQual}
-                            den={callReq}
-                            inverse
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV0 no-show / demandes d’appel"
+                                  num={rv0NoShow}
+                                  den={callReq}
+                                  inverse
+                                />
+                              </KpiBox>
 
-                        {/* 🔵 Nurturing */}
-                        <KpiBox tone="info">
-                          <KpiRatio
-                            label="RV0 nurturing / demandes d’appel"
-                            num={N.RV0_NURTURING}
-                            den={N.CALL_REQUESTED}
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV0 non qualifiés / demandes d’appel"
+                                  num={rv0NonQual}
+                                  den={callReq}
+                                  inverse
+                                />
+                              </KpiBox>
 
-                        {/* 💶 Ventes vs demandes d’appel */}
-                        <KpiBox tone="success">
-                          <KpiRatio
-                            label="Ventes / demandes d’appel"
-                            num={ventes}
-                            den={N.CALL_REQUESTED}
-                          />
-                        </KpiBox>
-                      </div>
-                    </div>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV0 nurturing / demandes d’appel"
+                                  num={N.RV0_NURTURING}
+                                  den={N.CALL_REQUESTED}
+                                />
+                              </KpiBox>
 
-                    {/* Bloc “RV0 → RV1 → Ventes” */}
-                    <div>
-                      <div className="text-[11px] uppercase tracking-wide text-[--muted] mb-1">
-                        Bloc “RV0 → RV1 → Ventes”
-                      </div>
+                              {/* KPI remonté : RV1 planifiés / RV0 faits */}
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV1 planifiés / RV0 faits"
+                                  num={rv1Planned}
+                                  den={rv0Done}
+                                />
+                              </KpiBox>
+                            </div>
+                          </div>
 
-                      {/* 🧩 Partie RV1 + Ventes */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 mb-3">
-                        {/* RV1 planifiés */}
-                        <KpiBox tone="info">
-                          <KpiRatio
-                            label="RV1 planifiés / RV0 faits"
-                            num={rv1Planned}
-                            den={rv0Done}
-                          />
-                        </KpiBox>
+                          {/* 🛰️ BLOC 2 — RV0 → RV1 → RV2 (mid funnel, ton “opérations”) */}
+                          <div className="rounded-3xl border border-white/12 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,0.10),rgba(8,11,20,0.98))] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-indigo-400/80 via-indigo-300/40 to-transparent" />
+                                  <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
+                                    Bloc 2 · RV0 → RV1 → RV2
+                                  </div>
+                                </div>
+                                <div className="text-[11px] text-[--muted]">
+                                  Qualité et stabilité des RDV jusqu’aux seconds RDV (RV2).
+                                </div>
+                              </div>
+                              <div className="hidden md:block text-[10px] text-[--muted]">
+                                Objectif : diminuer les annulations, no-show et pertes de dossiers au milieu du pipe.
+                              </div>
+                            </div>
 
-                        {/* RV1 faits */}
-                        <KpiBox tone="success">
-                          <KpiRatio
-                            label="RV1 faits / RV1 planifiés"
-                            num={rv1Honored}
-                            den={rv1Planned}
-                          />
-                        </KpiBox>
+                            {/* RV1 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 mb-3">
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV1 faits / RV1 planifiés"
+                                  num={rv1Honored}
+                                  den={rv1Planned}
+                                />
+                              </KpiBox>
 
-                        {/* RV1 reportés */}
-                        <KpiBox tone="warning">
-                          <KpiRatio
-                            label="RV1 reportés / RV1 planifiés"
-                            num={rv1Postponed}
-                            den={rv1Planned}
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV1 reportés / RV1 planifiés"
+                                  num={rv1Postponed}
+                                  den={rv1Planned}
+                                />
+                              </KpiBox>
 
-                        {/* RV1 annulés */}
-                        <KpiBox tone="danger">
-                          <KpiRatio
-                            label="RV1 annulés / RV1 planifiés"
-                            num={rv1Canceled}
-                            den={rv1Planned}
-                            inverse
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV1 annulés / RV1 planifiés"
+                                  num={rv1Canceled}
+                                  den={rv1Planned}
+                                  inverse
+                                />
+                              </KpiBox>
 
-                        {/* RV1 no-show */}
-                        <KpiBox tone="danger">
-                          <KpiRatio
-                            label="RV1 no-show / RV1 planifiés"
-                            num={rv1NoShow}
-                            den={rv1Planned}
-                            inverse
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV1 no-show / RV1 planifiés"
+                                  num={rv1NoShow}
+                                  den={rv1Planned}
+                                  inverse
+                                />
+                              </KpiBox>
 
-                        {/* RV1 non qualifiés */}
-                        <KpiBox tone="warning">
-                          <KpiRatio
-                            label="RV1 non qualifiés / RV1 planifiés"
-                            num={rv1NonQual}
-                            den={rv1Planned}
-                            inverse
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV1 non qualifiés / RV1 planifiés"
+                                  num={rv1NonQual}
+                                  den={rv1Planned}
+                                  inverse
+                                />
+                              </KpiBox>
 
-                        {/* RV1 follow-up closer */}
-                        <KpiBox tone="primary">
-                          <KpiRatio
-                            label="RV1 follow-up closer / RV1 faits"
-                            num={N.RV1_FOLLOWUP}
-                            den={rv1Honored}
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV1 follow-up closer / RV1 faits"
+                                  num={N.RV1_FOLLOWUP}
+                                  den={rv1Honored}
+                                />
+                              </KpiBox>
+                            </div>
 
-                        {/* Ventes / RV1 planifiés */}
-                        <KpiBox tone="success">
-                          <KpiRatio
-                            label="Ventes / RV1 planifiés"
-                            num={ventes}
-                            den={rv1Planned}
-                          />
-                        </KpiBox>
-                      </div>
+                            {/* RV2 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV2 planifiés / RV1 faits"
+                                  num={rv2Planned}
+                                  den={rv1Honored}
+                                />
+                              </KpiBox>
 
-                      {/* 🧩 Partie RV2 */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                        {/* RV2 planifiés */}
-                        <KpiBox tone="info">
-                          <KpiRatio
-                            label="RV2 planifiés / RV1 faits"
-                            num={rv2Planned}
-                            den={rv1Honored}
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV2 faits / RV2 planifiés"
+                                  num={rv2Honored}
+                                  den={rv2Planned}
+                                />
+                              </KpiBox>
 
-                        {/* RV2 faits */}
-                        <KpiBox tone="success">
-                          <KpiRatio
-                            label="RV2 faits / RV2 planifiés"
-                            num={rv2Honored}
-                            den={rv2Planned}
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV2 no-show / RV2 planifiés"
+                                  num={rv2NoShow}
+                                  den={rv2Planned}
+                                  inverse
+                                />
+                              </KpiBox>
 
-                        {/* RV2 no-show */}
-                        <KpiBox tone="danger">
-                          <KpiRatio
-                            label="RV2 no-show / RV2 planifiés"
-                            num={rv2NoShow}
-                            den={rv2Planned}
-                            inverse
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV2 annulés / RV2 planifiés"
+                                  num={rv2Canceled}
+                                  den={rv2Planned}
+                                  inverse
+                                />
+                              </KpiBox>
 
-                        {/* RV2 annulés */}
-                        <KpiBox tone="danger">
-                          <KpiRatio
-                            label="RV2 annulés / RV2 planifiés"
-                            num={rv2Canceled}
-                            den={rv2Planned}
-                            inverse
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="RV2 reportés / RV2 planifiés"
+                                  num={rv2Postponed}
+                                  den={rv2Planned}
+                                />
+                              </KpiBox>
+                            </div>
+                          </div>
 
-                        {/* RV2 reportés */}
-                        <KpiBox tone="warning">
-                          <KpiRatio
-                            label="RV2 reportés / RV2 planifiés"
-                            num={rv2Postponed}
-                            den={rv2Planned}
-                          />
-                        </KpiBox>
+                          {/* 💸 BLOC 3 — Ventes (WON) (fin de funnel, ton “business”) */}
+                          <div className="rounded-3xl border border-white/14 bg-[radial-gradient(circle_at_top,_rgba(52,211,153,0.10),rgba(7,11,18,0.98))] px-4 py-3 shadow-[0_20px_55px_rgba(0,0,0,.65)]">
+                            <div className="flex items-start justify-between mb-3 gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-emerald-400/85 via-emerald-300/40 to-transparent" />
+                                  <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
+                                    Bloc 3 · Ventes (WON)
+                                  </div>
+                                </div>
+                                <div className="text-[11px] text-[--muted]">
+                                  Vue orientée business : combien de ventes sortent réellement du pipeline.
+                                </div>
+                              </div>
+                              <div className="hidden md:block text-[10px] text-[--muted]">
+                                Objectif : suivre la vraie performance commerciale de l’équipe.
+                              </div>
+                            </div>
 
-                        {/* Ventes / RV2 planifiés */}
-                        <KpiBox tone="success">
-                          <KpiRatio
-                            label="Ventes / RV2 planifiés"
-                            num={ventes}
-                            den={rv2Planned}
-                          />
-                        </KpiBox>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="Ventes / demandes d’appel"
+                                  num={ventes}
+                                  den={callReq}
+                                />
+                              </KpiBox>
 
-                        {/* Ventes / RV2 faits */}
-                        <KpiBox tone="success">
-                          <KpiRatio
-                            label="Ventes / RV2 faits"
-                            num={ventes}
-                            den={rv2Honored}
-                          />
-                        </KpiBox>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="Ventes / RV0 faits"
+                                  num={ventes}
+                                  den={rv0Done}
+                                />
+                              </KpiBox>
 
-                        {/* Ventes / RV1 faits (global) */}
-                        <KpiBox tone="muted">
-                          <KpiRatio
-                            label="Ventes / RV1 faits"
-                            num={ventes}
-                            den={rv1Honored}
-                          />
-                        </KpiBox>
-                      </div>
-                    </div>
-                  </div>
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="Ventes / RV1 planifiés"
+                                  num={ventes}
+                                  den={rv1Planned}
+                                />
+                              </KpiBox>
+
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="Ventes / RV1 faits"
+                                  num={ventes}
+                                  den={rv1Honored}
+                                />
+                              </KpiBox>
+
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="Ventes / RV2 planifiés"
+                                  num={ventes}
+                                  den={rv2Planned}
+                                />
+                              </KpiBox>
+
+                              <KpiBox tone="muted">
+                                <KpiRatio
+                                  label="Ventes / RV2 faits"
+                                  num={ventes}
+                                  den={rv2Honored}
+                                />
+                              </KpiBox>
+                            </div>
+                          </div>
+                        </div>
                   
                     );
                   })()}
@@ -4513,4 +4579,3 @@ function KpiBox({
     </div>
   );
 }
-
