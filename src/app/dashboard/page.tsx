@@ -143,6 +143,11 @@ type CloserRow = {
   rv2CancelRate?: number | null;  // ✅ nouveau
   rv2NoShowRate?: number | null;     // ✅
 
+  // ✅ nouveaux dérivés
+  rv1HonorRate?: number | null;          // RV1 faits / RV1 planifiés
+  rv2HonorRate?: number | null;          // RV2 faits / RV2 planifiés
+  closingOnRv1Planned?: number | null;   // ventes / RV1 planifiés
+  
   // Business
   salesClosed: number;
   revenueTotal: number;
@@ -571,6 +576,15 @@ type Card = {
       group: "top",
     },
 
+        // ------- VENTES -------
+    {
+      key: "wonCount",
+      label: "Ventes (WON)",
+      value: data.won,
+      hint: "Dossiers passés en client (nombre de ventes).",
+      group: "top",
+    },
+
     // ------- DEMANDES D’APPEL → RV0 -------
     {
       key: "rv0Honored",
@@ -680,15 +694,6 @@ type Card = {
       value: data.rv2C,
       hint: "RV2 annulés avant d’avoir lieu.",
       group: "rv2",
-    },
-
-    // ------- VENTES -------
-    {
-      key: "wonCount",
-      label: "Ventes (WON)",
-      value: data.won,
-      hint: "Dossiers passés en client (nombre de ventes).",
-      group: "sales",
     },
   ];
 
@@ -1697,15 +1702,39 @@ useEffect(() => {
   }, [setters]);
 
   const closersWithRates = useMemo(() => {
-    return closers.map((c) => {
-      const closingDen = c.rv1Honored || 0;
-      const closingNum = c.salesClosed || 0;
-      const closingRate = closingDen
-        ? closingNum / closingDen
-        : 0; // 0..1
-      return { ...c, closingRate };
-    });
-  }, [closers]);
+  return closers.map((c) => {
+    const rv1Planned = c.rv1Planned || 0;
+    const rv1Honored = c.rv1Honored || 0;
+    const rv2Planned = c.rv2Planned || 0;
+    const rv2Honored = c.rv2Honored || 0;
+    const salesClosed = c.salesClosed || 0;
+
+    const closingRate = rv1Honored
+      ? salesClosed / rv1Honored
+      : 0; // ventes / RV1 faits
+
+    const closingOnRv1Planned = rv1Planned
+      ? salesClosed / rv1Planned
+      : 0; // ventes / RV1 planifiés
+
+    const rv1HonorRate = rv1Planned
+      ? rv1Honored / rv1Planned
+      : 0; // RV1 faits / RV1 planifiés
+
+    const rv2HonorRate = rv2Planned
+      ? rv2Honored / rv2Planned
+      : 0; // RV2 faits / RV2 planifiés
+
+    return {
+      ...c,
+      closingRate,
+      closingOnRv1Planned,
+      rv1HonorRate,
+      rv2HonorRate,
+    };
+  });
+}, [closers]);
+
 
   // Tri — règles demandées
   const sortedSetters = useMemo(() => {
@@ -2717,6 +2746,7 @@ function KpiBox({
                     const leadsTotal =
                       (leadsRcv?.total ?? 0) || N.LEADS_RECEIVED;
                     const callReq = N.CALL_REQUESTED;
+                    const rv0Planned = N.RV0_PLANNED ?? 0;
                     const rv0Done = N.RV0_HONORED;
                     const rv0NoShow = N.RV0_NO_SHOW;
                     const nonQual = N.NOT_QUALIFIED || 0;
@@ -2746,260 +2776,290 @@ function KpiBox({
 
                     return (
                     <div className="mt-4 space-y-4">
-                          {/* 🧊 BLOC 1 — Demandes d’appel → RV0 (top of funnel, ton “analyse”) */}
-                          <div className="rounded-3xl border border-white/12 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.12),rgba(9,12,19,0.96))] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,.55)]">
-                            <div className="flex items-start justify-between gap-3 mb-3">
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-sky-400/80 via-sky-300/40 to-transparent" />
-                                  <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
-                                    Bloc 1 · Demandes d’appel → RV0
-                                  </div>
-                                </div>
-                                <div className="text-[11px] text-[--muted]">
-                                  Comment les demandes d’appel se convertissent en premiers RDV (RV0).
-                                </div>
-                              </div>
-                              <div className="hidden md:block text-[10px] text-[--muted]">
-                                Objectif : maximiser les RV0 faits et limiter les pertes dès l’entrée du pipeline.
+                      {/* 🧊 BLOC 1 — Demandes d’appel → RV0 */}
+                      <div className="rounded-3xl border border-white/12 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.12),rgba(9,12,19,0.96))] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-sky-400/80 via-sky-300/40 to-transparent" />
+                              <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
+                                Bloc 1 · Demandes d’appel → RV0
                               </div>
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV0 faits / demandes d’appel"
-                                  num={rv0Done}
-                                  den={callReq}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV0 no-show / demandes d’appel"
-                                  num={rv0NoShow}
-                                  den={callReq}
-                                  inverse
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV0 non qualifiés / demandes d’appel"
-                                  num={rv0NonQual}
-                                  den={callReq}
-                                  inverse
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV0 nurturing / demandes d’appel"
-                                  num={N.RV0_NURTURING}
-                                  den={N.CALL_REQUESTED}
-                                />
-                              </KpiBox>
-
-                              {/* KPI remonté : RV1 planifiés / RV0 faits */}
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV1 planifiés / RV0 faits"
-                                  num={rv1Planned}
-                                  den={rv0Done}
-                                />
-                              </KpiBox>
+                            <div className="text-[11px] text-[--muted]">
+                              Comment les demandes d’appel se convertissent en premiers RDV (RV0) puis en RV1.
                             </div>
                           </div>
-
-                          {/* 🛰️ BLOC 2 — RV0 → RV1 → RV2 (mid funnel, ton “opérations”) */}
-                          <div className="rounded-3xl border border-white/12 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,0.10),rgba(8,11,20,0.98))] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,.55)]">
-                            <div className="flex items-start justify-between gap-3 mb-3">
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-indigo-400/80 via-indigo-300/40 to-transparent" />
-                                  <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
-                                    Bloc 2 · RV0 → RV1 → RV2
-                                  </div>
-                                </div>
-                                <div className="text-[11px] text-[--muted]">
-                                  Qualité et stabilité des RDV jusqu’aux seconds RDV (RV2).
-                                </div>
-                              </div>
-                              <div className="hidden md:block text-[10px] text-[--muted]">
-                                Objectif : diminuer les annulations, no-show et pertes de dossiers au milieu du pipe.
-                              </div>
-                            </div>
-
-                            {/* RV1 */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 mb-3">
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV1 faits / RV1 planifiés"
-                                  num={rv1Honored}
-                                  den={rv1Planned}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV1 reportés / RV1 planifiés"
-                                  num={rv1Postponed}
-                                  den={rv1Planned}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV1 annulés / RV1 planifiés"
-                                  num={rv1Canceled}
-                                  den={rv1Planned}
-                                  inverse
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV1 no-show / RV1 planifiés"
-                                  num={rv1NoShow}
-                                  den={rv1Planned}
-                                  inverse
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV1 non qualifiés / RV1 planifiés"
-                                  num={rv1NonQual}
-                                  den={rv1Planned}
-                                  inverse
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV1 follow-up closer / RV1 faits"
-                                  num={N.RV1_FOLLOWUP}
-                                  den={rv1Honored}
-                                />
-                              </KpiBox>
-                            </div>
-
-                            {/* RV2 */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV2 planifiés / RV1 faits"
-                                  num={rv2Planned}
-                                  den={rv1Honored}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV2 faits / RV2 planifiés"
-                                  num={rv2Honored}
-                                  den={rv2Planned}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV2 no-show / RV2 planifiés"
-                                  num={rv2NoShow}
-                                  den={rv2Planned}
-                                  inverse
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV2 annulés / RV2 planifiés"
-                                  num={rv2Canceled}
-                                  den={rv2Planned}
-                                  inverse
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="RV2 reportés / RV2 planifiés"
-                                  num={rv2Postponed}
-                                  den={rv2Planned}
-                                />
-                              </KpiBox>
-                            </div>
-                          </div>
-
-                          {/* 💸 BLOC 3 — Ventes (WON) (fin de funnel, ton “business”) */}
-                          <div className="rounded-3xl border border-white/14 bg-[radial-gradient(circle_at_top,_rgba(52,211,153,0.10),rgba(7,11,18,0.98))] px-4 py-3 shadow-[0_20px_55px_rgba(0,0,0,.65)]">
-                            <div className="flex items-start justify-between mb-3 gap-3">
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-emerald-400/85 via-emerald-300/40 to-transparent" />
-                                  <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
-                                    Bloc 3 · Ventes (WON)
-                                  </div>
-                                </div>
-                                <div className="text-[11px] text-[--muted]">
-                                  Vue orientée business : combien de ventes sortent réellement du pipeline.
-                                </div>
-                              </div>
-                              <div className="hidden md:block text-[10px] text-[--muted]">
-                                Objectif : suivre la vraie performance commerciale de l’équipe.
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="Ventes / demandes d’appel"
-                                  num={ventes}
-                                  den={callReq}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="Ventes / RV0 faits"
-                                  num={ventes}
-                                  den={rv0Done}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="Ventes / RV1 planifiés"
-                                  num={ventes}
-                                  den={rv1Planned}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="Ventes / RV1 faits"
-                                  num={ventes}
-                                  den={rv1Honored}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="Ventes / RV2 planifiés"
-                                  num={ventes}
-                                  den={rv2Planned}
-                                />
-                              </KpiBox>
-
-                              <KpiBox tone="muted">
-                                <KpiRatio
-                                  label="Ventes / RV2 faits"
-                                  num={ventes}
-                                  den={rv2Honored}
-                                />
-                              </KpiBox>
-                            </div>
+                          <div className="hidden md:block text-[10px] text-[--muted]">
+                            Objectif : maximiser les RV0 faits et préparer les RV1.
                           </div>
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                          {/* RV0 faits / demandes d’appel */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV0 faits / demandes d’appel"
+                              num={rv0Done}
+                              den={callReq}
+                            />
+                          </KpiBox>
+
+                          {/* RV0 no-show / demandes d’appel */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV0 no-show / demandes d’appel"
+                              num={rv0NoShow}
+                              den={callReq}
+                              inverse
+                            />
+                          </KpiBox>
+
+                          {/* RV0 non qualifiés / demandes d’appel */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV0 non qualifiés / demandes d’appel"
+                              num={rv0NonQual}
+                              den={callReq}
+                              inverse
+                            />
+                          </KpiBox>
+
+                          {/* RV0 nurturing / demandes d’appel */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV0 nurturing / demandes d’appel"
+                              num={N.RV0_NURTURING}
+                              den={N.CALL_REQUESTED}
+                            />
+                          </KpiBox>
+
+                          {/* ✅ NOUVEAUX KPI RV1 */}
+
+                          {/* RV1 planifiés / demandes d’appel */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 planifiés / demandes d’appel"
+                              num={rv1Planned}
+                              den={callReq}
+                            />
+                          </KpiBox>
+
+                          {/* RV1 faits / RV0 planifiés */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 faits / RV0 planifiés"
+                              num={rv1Honored}
+                              den={rv0Planned}
+                            />
+                          </KpiBox>
+
+                          {/* RV1 faits / demandes d’appel (vue early sur le pipe) */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 faits / demandes d’appel"
+                              num={rv1Honored}
+                              den={callReq}
+                            />
+                          </KpiBox>
+                        </div>
+                      </div>
+
+                      {/* 🛰️ BLOC 2 — RV0 → RV1 → RV2 */}
+                      <div className="rounded-3xl border border-white/12 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,0.10),rgba(8,11,20,0.98))] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-indigo-400/80 via-indigo-300/40 to-transparent" />
+                              <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
+                                Bloc 2 · RV0 → RV1 → RV2
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-[--muted]">
+                              Qualité et stabilité des RDV jusqu’aux seconds RDV (RV2).
+                            </div>
+                          </div>
+                          <div className="hidden md:block text-[10px] text-[--muted]">
+                            Objectif : limiter annulations, no-show et pertes au milieu du pipe.
+                          </div>
+                        </div>
+
+                        {/* RV1 */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 mb-3">
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 faits / RV1 planifiés"
+                              num={rv1Honored}
+                              den={rv1Planned}
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 reportés / RV1 planifiés"
+                              num={rv1Postponed}
+                              den={rv1Planned}
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 annulés / RV1 planifiés"
+                              num={rv1Canceled}
+                              den={rv1Planned}
+                              inverse
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 no-show / RV1 planifiés"
+                              num={rv1NoShow}
+                              den={rv1Planned}
+                              inverse
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 non qualifiés / RV1 planifiés"
+                              num={rv1NonQual}
+                              den={rv1Planned}
+                              inverse
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV1 follow-up closer / RV1 faits"
+                              num={N.RV1_FOLLOWUP}
+                              den={rv1Honored}
+                            />
+                          </KpiBox>
+                        </div>
+
+                        {/* RV2 */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV2 planifiés / RV1 faits"
+                              num={rv2Planned}
+                              den={rv1Honored}
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV2 faits / RV2 planifiés"
+                              num={rv2Honored}
+                              den={rv2Planned}
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV2 no-show / RV2 planifiés"
+                              num={rv2NoShow}
+                              den={rv2Planned}
+                              inverse
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV2 annulés / RV2 planifiés"
+                              num={rv2Canceled}
+                              den={rv2Planned}
+                              inverse
+                            />
+                          </KpiBox>
+
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="RV2 reportés / RV2 planifiés"
+                              num={rv2Postponed}
+                              den={rv2Planned}
+                            />
+                          </KpiBox>
+                        </div>
+                      </div>
+
+                      {/* 💸 BLOC 3 — Ventes (WON) */}
+                      <div className="rounded-3xl border border-white/14 bg-[radial-gradient(circle_at_top,_rgba(52,211,153,0.10),rgba(7,11,18,0.98))] px-4 py-3 shadow-[0_20px_55px_rgba(0,0,0,.65)]">
+                        <div className="flex items-start justify-between mb-3 gap-3">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="h-6 w-0.5 rounded-full bg-gradient-to-b from-emerald-400/85 via-emerald-300/40 to-transparent" />
+                              <div className="text-[11px] uppercase tracking-wide text-slate-100/90">
+                                Bloc 3 · Ventes
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-[--muted]">
+                              Vue orientée business : combien de ventes sortent réellement du pipeline.
+                            </div>
+                          </div>
+                          <div className="hidden md:block text-[10px] text-[--muted]">
+                            Objectif : suivre la performance commerciale finale.
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                          {/* Ventes / demandes d’appel */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="Ventes / demandes d’appel"
+                              num={ventes}
+                              den={callReq}
+                            />
+                          </KpiBox>
+
+                          {/* Ventes / RV0 faits */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="Ventes / RV0 faits"
+                              num={ventes}
+                              den={rv0Done}
+                            />
+                          </KpiBox>
+
+                          {/* Ventes / RV1 planifiés */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="Ventes / RV1 planifiés"
+                              num={ventes}
+                              den={rv1Planned}
+                            />
+                          </KpiBox>
+
+                          {/* Ventes / RV1 faits */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="Ventes / RV1 faits"
+                              num={ventes}
+                              den={rv1Honored}
+                            />
+                          </KpiBox>
+
+                          {/* Ventes / RV2 planifiés */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="Ventes / RV2 planifiés"
+                              num={ventes}
+                              den={rv2Planned}
+                            />
+                          </KpiBox>
+
+                          {/* Ventes / RV2 faits */}
+                          <KpiBox tone="muted">
+                            <KpiRatio
+                              label="Ventes / RV2 faits"
+                              num={ventes}
+                              den={rv2Honored}
+                            />
+                          </KpiBox>
+                        </div>
+                      </div>
+                    </div>
                   
                     );
                   })()}
@@ -3925,6 +3985,7 @@ function KpiBox({
                     {/* RV1 */}
                     <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
                     <th className="py-2.5 px-3 font-medium text-right">RV1 faits</th>
+                    <th className="py-2.5 px-3 font-medium text-right">% RV1 faits / RV1 planifiés</th>
                     <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
                     <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
                     <th className="py-2.5 px-3 font-medium text-right">RV1 reportés</th>
@@ -3935,6 +3996,7 @@ function KpiBox({
                     {/* RV2 */}
                     <th className="py-2.5 px-3 font-medium text-right">RV2 planifiés</th>
                     <th className="py-2.5 px-3 font-medium text-right">RV2 faits</th>
+                    <th className="py-2.5 px-3 font-medium text-right">% RV2 faits / RV2 planifiés</th>
                     <th className="py-2.5 px-3 font-medium text-right">No-show RV2</th>
                     <th className="py-2.5 px-3 font-medium text-right">RV2 annulés</th>
                     <th className="py-2.5 px-3 font-medium text-right">RV2 reportés</th>
@@ -3945,7 +4007,8 @@ function KpiBox({
                     <th className="py-2.5 px-3 font-medium text-right">Contrats signés</th>
                     <th className="py-2.5 px-3 font-medium text-right">Ventes</th>
                     <th className="py-2.5 px-3 font-medium text-right">CA</th>
-                    <th className="py-2.5 px-3 font-medium text-right">Taux closing</th>
+                    <th className="py-2.5 px-3 font-medium text-right">Taux closing / RV1 planifiés</th>
+                    <th className="py-2.5 px-3 font-medium text-right">Taux closing / RV1 faits</th>
                   </tr>
                 </thead>
 
@@ -3972,9 +4035,21 @@ function KpiBox({
                         </div>
                       </td>
 
-                      {/* RV1 */}
+                      {/* RV1 volumes */}
                       <td className={neutralKpiCell}>{c.rv1Planned ?? 0}</td>
                       <td className={neutralKpiCell}>{c.rv1Honored ?? 0}</td>
+
+                      {/* % RV1 faits / planifiés */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={positiveRateBadgeClass(c.rv1HonorRate)}>
+                            {c.rv1HonorRate == null
+                              ? "—"
+                              : `${Math.round((c.rv1HonorRate || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
+
                       <td className={neutralKpiCell}>{c.rv1NoShow ?? 0}</td>
                       <td className={neutralKpiCell}>{c.rv1Canceled ?? 0}</td>
                       <td className={neutralKpiCell}>{c.rv1Postponed ?? 0}</td>
@@ -4002,9 +4077,21 @@ function KpiBox({
                         </div>
                       </td>
 
-                      {/* RV2 */}
+                      {/* RV2 volumes */}
                       <td className={neutralKpiCell}>{c.rv2Planned ?? 0}</td>
                       <td className={neutralKpiCell}>{c.rv2Honored ?? 0}</td>
+
+                      {/* % RV2 faits / planifiés */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={positiveRateBadgeClass(c.rv2HonorRate)}>
+                            {c.rv2HonorRate == null
+                              ? "—"
+                              : `${Math.round((c.rv2HonorRate || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
+
                       <td className={neutralKpiCell}>{c.rv2NoShow ?? 0}</td>
                       <td className={neutralKpiCell}>{c.rv2Canceled ?? 0}</td>
                       <td className={neutralKpiCell}>{c.rv2Postponed ?? 0}</td>
@@ -4037,6 +4124,19 @@ function KpiBox({
                       <td className={neutralKpiCell}>
                         {(c.revenueTotal || 0).toLocaleString("fr-FR")} €
                       </td>
+
+                      {/* Taux closing / RV1 planifiés */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex justify-end">
+                          <span className={positiveRateBadgeClass(c.closingOnRv1Planned)}>
+                            {c.closingOnRv1Planned == null
+                              ? "—"
+                              : `${Math.round((c.closingOnRv1Planned || 0) * 100)}%`}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Taux closing / RV1 faits */}
                       <td className="py-2.5 px-3">
                         <div className="flex justify-end">
                           <span className={positiveRateBadgeClass(c.closingRate)}>
@@ -4053,7 +4153,7 @@ function KpiBox({
                     <tr>
                       <td
                         className="py-6 px-3 text-[--muted] text-sm"
-                        colSpan={20} // 1 closer + 19 colonnes de métriques
+                        colSpan={24} 
                       >
                         Aucune donnée sur la période sélectionnée.
                       </td>
@@ -4089,7 +4189,9 @@ function KpiBox({
                       <th className="py-2.5 px-3 font-medium">Setter</th>
                       <th className="py-2.5 px-3 font-medium text-right">Demande d'appel</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
-                      <th className="py-2.5 px-3 font-medium text-right">RV1 Fait</th>
+                      <th className="py-2.5 px-3 font-medium text-right">RV1 faits</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% RV1 planifiés / demandes d’appel</th>
+                      <th className="py-2.5 px-3 font-medium text-right">% RV1 faits / RV1 planifiés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 annulés</th>
                       <th className="py-2.5 px-3 font-medium text-right">RV1 no-show</th>
                       <th className="py-2.5 px-3 font-medium text-right">% annulation RV1</th>
@@ -4101,99 +4203,137 @@ function KpiBox({
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedSetters.slice(0, 8).map((s, i) => (
-                      <tr
-                        key={s.userId}
-                        className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
-                      >
-                        {/* Setter + rang */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
-                              {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-medium truncate text-[13px]">
-                                {s.name || "—"}
+
+                    {sortedSetters.slice(0, 8).map((s, i) => {
+                      const rv1PlanVsCalls =
+                        (s.leadsReceived || 0) > 0
+                          ? (s.rv1PlannedOnHisLeads || 0) / (s.leadsReceived || 1)
+                          : null;
+
+                      const rv1DoneVsPlanned =
+                        (s.rv1PlannedOnHisLeads || 0) > 0
+                          ? (s.rv1DoneOnHisLeads || 0) / (s.rv1PlannedOnHisLeads || 1)
+                          : null;
+
+                      return (
+                        <tr
+                          key={s.userId}
+                          className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
+                        >
+                          {/* Setter + rang */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-[11px] text-[--muted]">
+                                {i < 3 ? ["🥇", "🥈", "🥉"][i] : `#${i + 1}`}
                               </div>
-                              <div className="text-[10px] text-[--muted] truncate">
-                                {s.email}
+                              <div className="min-w-0">
+                                <div className="font-medium truncate text-[13px]">
+                                  {s.name || "—"}
+                                </div>
+                                <div className="text-[10px] text-[--muted] truncate">
+                                  {s.email}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        {/* Volumes */}
-                        <td className={neutralKpiCell}>{s.leadsReceived ?? 0}</td>
-                        <td className={neutralKpiCell}>{s.rv1PlannedOnHisLeads ?? 0}</td>
-                        <td className={neutralKpiCell}>{s.rv1DoneOnHisLeads ?? 0}</td>
-                        <td className={neutralKpiCell}>{s.rv1CanceledOnHisLeads ?? 0}</td>
-                        <td className={neutralKpiCell}>{s.rv1NoShowOnHisLeads ?? 0}</td>
+                          {/* Volumes bruts */}
+                          <td className={neutralKpiCell}>{s.leadsReceived ?? 0}</td>
+                          <td className={neutralKpiCell}>{s.rv1PlannedOnHisLeads ?? 0}</td>
+                          <td className={neutralKpiCell}>{s.rv1DoneOnHisLeads ?? 0}</td>
 
-                        {/* % annulation RV1 */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            <span className={cancelRateBadgeClass(s.rv1CancelRateOnHisLeads ?? s.rv1CancelRate)}>
-                              {s.rv1CancelRateOnHisLeads == null && s.rv1CancelRate == null
-                                ? "—"
-                                : `${Math.round(((s.rv1CancelRateOnHisLeads ?? s.rv1CancelRate) || 0) * 100)}%`}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* % no-show RV1 */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            <span className={cancelRateBadgeClass(s.rv1NoShowRate)}>
-                              {s.rv1NoShowRate == null
-                                ? "—"
-                                : `${Math.round((s.rv1NoShowRate || 0) * 100)}%`}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Ventes & CA depuis ses leads */}
-                        <td className={neutralKpiCell}>{s.salesFromHisLeads ?? 0}</td>
-                        <td className={neutralKpiCell}>
-                          {(s.revenueFromHisLeads || 0).toLocaleString("fr-FR")} €
-                        </td>
-
-                        {/* TTFC : plus c’est bas, mieux c’est */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            {s.ttfcAvgMinutes == null ? (
-                              <span className="text-[11px] text-[--muted]">—</span>
-                            ) : (
-                              <span
-                                className={
-                                  s.ttfcAvgMinutes <= 15
-                                    ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-500/40"
-                                    : s.ttfcAvgMinutes <= 45
-                                    ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-amber-500/20 text-amber-100 ring-1 ring-amber-500/40"
-                                    : "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-red-500/20 text-red-100 ring-1 ring-red-500/40"
-                                }
-                              >
-                                {s.ttfcAvgMinutes} min
+                          {/* % RV1 planifiés / demandes d’appel */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex justify-end">
+                              <span className={positiveRateBadgeClass(rv1PlanVsCalls ?? undefined)}>
+                                {rv1PlanVsCalls == null
+                                  ? "—"
+                                  : `${Math.round((rv1PlanVsCalls || 0) * 100)}%`}
                               </span>
-                            )}
-                          </div>
-                        </td>
+                            </div>
+                          </td>
 
-                        {/* Taux de setting */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex justify-end">
-                            <span className={positiveRateBadgeClass(s.settingRate)}>
-                              {s.settingRate == null
-                                ? "—"
-                                : `${Math.round((s.settingRate || 0) * 100)}%`}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          {/* % RV1 faits / RV1 planifiés */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex justify-end">
+                              <span className={positiveRateBadgeClass(rv1DoneVsPlanned ?? undefined)}>
+                                {rv1DoneVsPlanned == null
+                                  ? "—"
+                                  : `${Math.round((rv1DoneVsPlanned || 0) * 100)}%`}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* RV1 annulés / no-show (volumes) */}
+                          <td className={neutralKpiCell}>{s.rv1CanceledOnHisLeads ?? 0}</td>
+                          <td className={neutralKpiCell}>{s.rv1NoShowOnHisLeads ?? 0}</td>
+
+                          {/* % annulation RV1 */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex justify-end">
+                              <span className={cancelRateBadgeClass(s.rv1CancelRateOnHisLeads ?? s.rv1CancelRate)}>
+                                {s.rv1CancelRateOnHisLeads == null && s.rv1CancelRate == null
+                                  ? "—"
+                                  : `${Math.round(((s.rv1CancelRateOnHisLeads ?? s.rv1CancelRate) || 0) * 100)}%`}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* % no-show RV1 */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex justify-end">
+                              <span className={cancelRateBadgeClass(s.rv1NoShowRate)}>
+                                {s.rv1NoShowRate == null
+                                  ? "—"
+                                  : `${Math.round((s.rv1NoShowRate || 0) * 100)}%`}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Ventes & CA depuis ses leads */}
+                          <td className={neutralKpiCell}>{s.salesFromHisLeads ?? 0}</td>
+                          <td className={neutralKpiCell}>
+                            {(s.revenueFromHisLeads || 0).toLocaleString("fr-FR")} €
+                          </td>
+
+                          {/* TTFC */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex justify-end">
+                              {s.ttfcAvgMinutes == null ? (
+                                <span className="text-[11px] text-[--muted]">—</span>
+                              ) : (
+                                <span
+                                  className={
+                                    s.ttfcAvgMinutes <= 15
+                                      ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-500/40"
+                                      : s.ttfcAvgMinutes <= 45
+                                      ? "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-amber-500/20 text-amber-100 ring-1 ring-amber-500/40"
+                                      : "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums bg-red-500/20 text-red-100 ring-1 ring-red-500/40"
+                                  }
+                                >
+                                  {s.ttfcAvgMinutes} min
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Taux de setting global */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex justify-end">
+                              <span className={positiveRateBadgeClass(s.settingRate)}>
+                                {s.settingRate == null
+                                  ? "—"
+                                  : `${Math.round((s.settingRate || 0) * 100)}%`}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
                     {!sortedSetters.length && (
                       <tr>
-                        <td className="py-6 px-3 text-[--muted] text-sm" colSpan={12}>
+                        <td className="py-6 px-3 text-[--muted] text-sm" colSpan={14}>
                           Aucune donnée setter sur la période sélectionnée.
                         </td>
                       </tr>
@@ -4203,8 +4343,6 @@ function KpiBox({
               </div>
             </div>
           </div>
-
-
 
             {/* DUO STRIP */}
             {duos.length > 0 && (
@@ -4579,3 +4717,5 @@ function KpiBox({
     </div>
   );
 }
+
+
