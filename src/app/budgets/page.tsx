@@ -12,6 +12,7 @@ import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 import { getAccessToken } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useFunnelMetrics } from "@/hooks/useFunnelMetrics";
 
 // ✅ IMPORT DU BUDGET PANEL (ajuste le chemin si besoin)
 import BudgetPanel from "@/components/BudgetPanel";
@@ -86,6 +87,7 @@ type BudgetRow = {
 type WeeklyOpsRow = {
   weekStart: string;
   weekEnd: string;
+  callRequests: number;
   rv0Planned: number;
   rv0Honored: number;
   rv0NoShow?: number;
@@ -1260,9 +1262,11 @@ const selectedWeekStartDate =
           acc.rv0Honored += w.rv0Honored || 0;
           acc.rv1Planned += w.rv1Planned || 0;
           acc.rv1Honored += w.rv1Honored || 0;
+          acc.callRequests += w.callRequests || 0;
+
           return acc;
         },
-        { rv0Honored: 0, rv1Planned: 0, rv1Honored: 0 }
+        { rv0Honored: 0, rv1Planned: 0, rv1Honored: 0, callRequests: 0 }
       ),
     [ops]
   );
@@ -1348,8 +1352,8 @@ const selectedWeekStartDate =
 
         const rv1Planned = opsWeek?.rv1Planned ?? 0;
         const rv1Honored = opsWeek?.rv1Honored ?? 0;
+        const callRequests = opsWeek?.callRequests ?? 0;
 
-        const callRequests = s?.leadsReceived ?? 0;
         const salesCount = salesWeek?.count ?? s?.wonCount ?? 0;
         const caVendu = salesWeek?.revenue ?? s?.revenue ?? 0;
 
@@ -1656,7 +1660,7 @@ const selectedWeekStartDate =
                     Demandes d’appel (période)
                   </div>
                   <div className="mt-1 text-2xl font-semibold">
-                    {fmtInt(totalCallRequests)}
+                    {fmtInt(opsTotals.callRequests)}
                   </div>
                 </div>
 
