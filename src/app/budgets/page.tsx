@@ -14,12 +14,11 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFunnelMetrics } from "@/hooks/useFunnelMetrics";
 
-// ✅ IMPORT DU BUDGET PANEL (ajuste le chemin si besoin)
+// ✅ IMPORT DU BUDGET PANEL
 import BudgetPanel from "@/components/BudgetPanel";
 
 /* =============================================================================
-   Helpers GET/POST (silencieux) pour tester plusieurs routes sans polluer console
-   → Utilise l'instance Axios `api` pour respecter le baseURL + auth
+   Helpers GET/POST pour tester plusieurs routes (reporting/analytics)
 ============================================================================= */
 async function tryGet<T>(
   candidates: Array<{ url: string; params?: Record<string, any> }>,
@@ -30,14 +29,10 @@ async function tryGet<T>(
       const res = await api.get(c.url, {
         params: c.params,
       });
-      // on considère que si ça répond 2xx, c'est bon
       return { data: (res.data ?? fallback) as T, hit: c.url };
     } catch (err: any) {
       const status = err?.response?.status;
-      // si la route n'existe pas, on teste le candidat suivant
       if (status === 404) continue;
-      // pour les autres erreurs (401, 500, etc.), on n'arrête pas l'app,
-      // mais on laisse la boucle essayer le candidat suivant
     }
   }
   return { data: fallback, hit: null };
@@ -54,11 +49,7 @@ async function tryPost(
       }
     } catch (err: any) {
       const status = err?.response?.status;
-      if (status === 404) {
-        // on teste le fallback suivant
-        continue;
-      }
-      // autres erreurs : on essaie quand même le candidat suivant
+      if (status === 404) continue;
     }
   }
   return { ok: false, hit: null };
@@ -68,10 +59,10 @@ async function tryPost(
 type WeeklySnapshot = {
   weekStart: string;
   weekEnd: string;
-  spend: number;          // éventuellement ignoré si budget manuel
+  spend: number;
   leadsReceived: number;
   wonCount: number;
-  revenue: number;        // CA “cohorte” côté reporting
+  revenue: number;
   cpl: number | null;
   roas: number | null;
 };
@@ -127,11 +118,6 @@ type LeadsReceivedOut = {
   byDay?: Array<{ day: string; count: number }>;
 };
 
-type CallRequestsOut = {
-  total: number;
-  byDay?: Array<{ day: string; count: number }>;
-};
-
 /** ---------- Utils ---------- */
 const fmtInt = (n: number) => Math.round(n).toLocaleString("fr-FR");
 const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
@@ -145,12 +131,141 @@ function normalizeDate(d: unknown): Date | undefined {
   if (!d) return undefined;
   return d instanceof Date ? d : new Date(d as string);
 }
+
 function toISODate(d: Date | string) {
   const x = d instanceof Date ? new Date(d) : new Date(d);
   const y = x.getFullYear();
   const m = String(x.getMonth() + 1).padStart(2, "0");
   const dd = String(x.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
+}
+
+/** Normalise les totaux d’événements (FR/EN) */
+function normalizeTotals(
+  raw: Record<string, number | undefined> | undefined
+) {
+  const T = raw || {};
+  const pick = (...keys: string[]) => {
+    for (const k of keys) {
+      if (T[k] != null) return Number(T[k]);
+    }
+    return 0;
+  };
+
+  return {
+    // -------- Entrées de pipeline --------
+    LEADS_RECEIVED: pick(
+      "LEADS_RECEIVED",
+      "LEAD_RECEIVED",
+      "LEAD_RECU",
+      "LEAD_REÇU",
+      "LEADS"
+    ),
+
+    CALL_REQUESTED: pick(
+      "CALL_REQUESTED",
+      "DEMANDE_APPEL",
+      "CALL_REQUEST",
+      "APPOINTMENT_REQUEST"
+    ),
+
+    CALL_ATTEMPT: pick(
+      "CALL_ATTEMPT",
+      "APPEL_PASSE",
+      "APPEL_PASSÉ",
+      "CALLS_TOTAL",
+      "CALL_MADE"
+    ),
+
+    CALL_ANSWERED: pick(
+      "CALL_ANSWERED",
+      "APPEL_REPONDU",
+      "APPEL_RÉPONDU",
+      "CALL_ANSWER"
+    ),
+
+    SETTER_NO_SHOW: pick("SETTER_NO_SHOW", "NO_SHOW_SETTER"),
+
+    // -------- RV0 (diagnostic) --------
+    RV0_PLANNED: pick("RV0_PLANNED", "RV0_PLANIFIE", "RV0_PLANIFIÉ"),
+    RV0_HONORED: pick("RV0_HONORED", "RV0_HONORE", "RV0_HONORÉ"),
+    RV0_NO_SHOW: pick("RV0_NO_SHOW"),
+
+    RV0_NOT_QUALIFIED_1: pick(
+      "RV0_NOT_QUALIFIED_1",
+      "RV0_NOT_QUALIFIE_1",
+      "RV0_NOT_QUALIFIÉ_1"
+    ),
+    RV0_NOT_QUALIFIED_2: pick(
+      "RV0_NOT_QUALIFIED_2",
+      "RV0_NOT_QUALIFIE_2",
+      "RV0_NOT_QUALIFIÉ_2"
+    ),
+    RV0_NURTURING: pick(
+      "RV0_NURTURING",
+      "NURTURING_RV0",
+      "FOLLOW_UP",
+      "FOLLOW_UP_SETTER"
+    ),
+
+    // -------- RV1 (closing) --------
+    RV1_PLANNED: pick("RV1_PLANNED", "RV1_PLANIFIE", "RV1_PLANIFIÉ"),
+    RV1_HONORED: pick("RV1_HONORED", "RV1_HONORE", "RV1_HONORÉ"),
+    RV1_NO_SHOW: pick("RV1_NO_SHOW"),
+
+    RV1_NOT_QUALIFIED: pick(
+      "RV1_NOT_QUALIFIED",
+      "NOT_QUALIFIED_RV1",
+      "RV1_NON_QUALIFIE",
+      "RV1_NON_QUALIFIÉ"
+    ),
+
+    RV1_FOLLOWUP: pick(
+      "FOLLOW_UP_CLOSER",
+      "RV1_FOLLOW_UP",
+      "FOLLOW_UP_RV1",
+      "FOLLOWUP_CLOSER"
+    ),
+
+    // -------- RV2 (suivi / relance) --------
+    RV2_PLANNED: pick("RV2_PLANNED", "RV2_PLANIFIE", "RV2_PLANIFIÉ"),
+    RV2_HONORED: pick("RV2_HONORED", "RV2_HONORE", "RV2_HONORÉ"),
+    RV2_NO_SHOW: pick("RV2_NO_SHOW"),
+
+    RV0_CANCELED: pick("RV0_CANCELED", "RV0_ANNULÉ", "RV0_ANNULE"),
+    RV1_CANCELED: pick("RV1_CANCELED", "RV1_ANNULÉ", "RV1_ANNULE"),
+    RV2_CANCELED: pick("RV2_CANCELED", "RV2_ANNULÉ", "RV2_ANNULE"),
+
+    RV1_POSTPONED: pick(
+      "RV1_POSTPONED",
+      "RV1_RESCHEDULED",
+      "RV1_REPORTÉ",
+      "RV1_REPORTE"
+    ),
+    RV2_POSTPONED: pick(
+      "RV2_POSTPONED",
+      "RV2_RESCHEDULED",
+      "RV2_REPORTÉ",
+      "RV2_REPORTE"
+    ),
+
+    // -------- Sorties de pipeline --------
+    WON: pick("WON"),
+    LOST: pick("LOST"),
+    NOT_QUALIFIED: pick(
+      "NOT_QUALIFIED",
+      "NON_QUALIFIE",
+      "NON_QUALIFIÉ"
+    ),
+
+    APPOINTMENT_CANCELED: pick(
+      "APPOINTMENT_CANCELED",
+      "APPOINTMENT_CANCELLED",
+      "RDV_ANNULE",
+      "RDV_ANNULÉ",
+      "appointmentCanceled"
+    ),
+  };
 }
 
 /** ---------- Helpers semaine (lundi → dimanche) ---------- */
@@ -320,9 +435,60 @@ function DrillModal({
 export default function BudgetPage() {
   const router = useRouter();
 
+  /** -------- Filtres : semaine par défaut = semaine écoulée -------- */
+  const { defaultFrom, defaultTo } = useMemo(() => {
+    const { from, to } = getLastFullWeek();
+    return { defaultFrom: from, defaultTo: to };
+  }, []);
+
+  const [uiRange, setUiRange] = useState<Range>({
+    from: defaultFrom,
+    to: defaultTo,
+  });
+  const [appliedRange, setAppliedRange] = useState<Range>({
+    from: defaultFrom,
+    to: defaultTo,
+  });
+
+  const [tz] = useState<string>("Europe/Paris");
+
+  // Période pour le funnel = période appliquée (mêmes dates que le dashboard)
+  const fromDate = useMemo(
+    () => normalizeDate(appliedRange.from) ?? new Date(),
+    [appliedRange.from]
+  );
+  const toDate = useMemo(
+    () => normalizeDate(appliedRange.to) ?? new Date(),
+    [appliedRange.to]
+  );
+
+  const {
+    data: funnelRaw = {},
+    loading: funnelLoading,
+    error: funnelErrorRaw,
+  } = useFunnelMetrics(fromDate, toDate, tz) as {
+    data?: Record<string, number | undefined>;
+    loading: boolean;
+    error: unknown;
+  };
+
+// On normalise l’erreur en string nullable, exploitable en ReactNode
+const funnelError =
+  funnelErrorRaw == null
+    ? null
+    : typeof funnelErrorRaw === "string"
+    ? funnelErrorRaw
+    : JSON.stringify(funnelErrorRaw);
+
+
+  const funnelTotals = normalizeTotals(
+    funnelRaw as Record<string, number | undefined>
+  );
+
   /** -------- Auth guard -------- */
   const [authChecked, setAuthChecked] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     async function verify() {
@@ -350,23 +516,9 @@ export default function BudgetPage() {
     };
   }, [router]);
 
-  /** -------- Filtres : on force une semaine lundi → dimanche -------- */
-  const { from: defaultFrom, to: defaultTo } = useMemo(
-    () => getLastFullWeek(),
-    []
-  );
-
-  const [uiRange, setUiRange] = useState<Range>({
-    from: defaultFrom,
-    to: defaultTo,
-  });
-  const [appliedRange, setAppliedRange] = useState<Range>({
-    from: defaultFrom,
-    to: defaultTo,
-  });
-
-  const fromISO = appliedRange.from ? toISODate(appliedRange.from) : undefined;
-  const toISO = appliedRange.to ? toISODate(appliedRange.to) : undefined;
+  /** -------- Dates ISO pour API -------- */
+  const fromISO = appliedRange.from ? toISODate(appliedRange.from as any) : undefined;
+  const toISO = appliedRange.to ? toISODate(appliedRange.to as any) : undefined;
 
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -384,7 +536,6 @@ export default function BudgetPage() {
   const [ops, setOps] = useState<WeeklyOpsRow[]>([]);
   const [weeklySales, setWeeklySales] = useState<WeeklySales[]>([]);
   const [leadsTotal, setLeadsTotal] = useState<number>(0);
-  const [callRequestsTotal, setCallRequestsTotal] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -394,7 +545,7 @@ export default function BudgetPage() {
   const [drillRows, setDrillRows] = useState<DrillItem[]>([]);
   const [drillExtra, setDrillExtra] = useState<ReactNode>(null);
 
-  /** -------- Saisie comptable : budgets & CA encaissé par semaine -------- */
+  /** -------- Saisie comptable -------- */
   const [budgetDrafts, setBudgetDrafts] = useState<Record<string, string>>({});
   const [cashInDrafts, setCashInDrafts] = useState<Record<string, string>>({});
   const [savingWeek, setSavingWeek] = useState<string | null>(null);
@@ -409,8 +560,7 @@ export default function BudgetPage() {
       setLoading(true);
       setErr(null);
       try {
-        // ====== Budgets (GET) : /reporting/budget | /analytics/budget
-        // ✅ On ne filtre plus par from/to : on récupère tous les budgets et on filtrera par weekStart côté front.
+        // ====== Budgets (GET) : on récupère tous les budgets
         const budgetGet = await tryGet<any>(
           [
             { url: "/reporting/budget" },
@@ -454,7 +604,7 @@ export default function BudgetPage() {
           setSeries(s);
         }
 
-        // ====== Weekly ops : /reporting/weekly-ops | /analytics/weekly-ops
+        // ====== Weekly ops
         const opsGet = await tryGet<any>(
           [
             { url: "/reporting/weekly-ops", params: { from: fromISO, to: toISO } },
@@ -470,7 +620,7 @@ export default function BudgetPage() {
           setOps(rows.slice().sort((a, b) => a.weekStart.localeCompare(b.weekStart)));
         }
 
-        // ====== Weekly sales : /reporting/sales-weekly | /analytics/sales-weekly
+        // ====== Weekly sales
         const salesGet = await tryGet<WeeklySales[]>(
           [
             {
@@ -492,7 +642,7 @@ export default function BudgetPage() {
           );
         }
 
-        // ====== Leads reçus sur la période (comme sur le dashboard) =====
+        // ====== Leads reçus sur la période (fallback si funnel indispo)
         const leadsGet = await tryGet<any>(
           [
             {
@@ -521,37 +671,6 @@ export default function BudgetPage() {
         if (!cancelled) {
           setLeadsTotal(leadsTotalComputed);
         }
-
-        // ====== Demandes d’appel sur la période =====
-   /*     const callReqGet = await tryGet<any>(
-          [
-            {
-              url: "/reporting/call-requests",
-              params: { from: fromISO, to: toISO },
-            },
-            {
-              url: "/metrics/call-requests-by-day",
-              params: { from: fromISO, to: toISO },
-            },
-          ],
-          { total: 0 }
-        );
-
-       const CR = callReqGet.data as CallRequestsOut | any;
-
-        const callRequestsTotalComputed =
-          (typeof CR?.total === "number" ? CR.total : 0) ||
-          (Array.isArray(CR?.byDay)
-            ? CR.byDay.reduce(
-                (s: number, d: any) => s + (d.count || d.value || 0),
-                0
-              )
-            : 0);
-
-        if (!cancelled) {
-          setCallRequestsTotal(callRequestsTotalComputed);
-        }*/
-
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Erreur de chargement");
       } finally {
@@ -564,7 +683,7 @@ export default function BudgetPage() {
       cancelled = true;
     };
   }, [authChecked, authError, fromISO, toISO]);
-  
+
   /** -------- Drill helpers -------- */
   async function openAppointmentsDrill(params: {
     title: string;
@@ -649,7 +768,80 @@ export default function BudgetPage() {
     setDrillOpen(true);
   }
 
-  /** -------- Helpers UI “board” -------- */
+  async function fetchSafe(
+    url: string,
+    params: Record<string, any>
+  ) {
+    try {
+      return await api.get(url, { params });
+    } catch (e: any) {
+      return {
+        data: {
+          items: [],
+          __error:
+            e?.response?.data?.message ||
+            "Endpoint non disponible (à activer côté API)",
+        },
+      };
+    }
+  }
+
+ async function openCallRequestsDrill() {
+  const res: any = await fetchSafe("/reporting/drill/call-requests", {
+    from: fromISO,
+    to: toISO,
+    limit: 2000,
+    tz,
+  });
+
+  setDrillTitle("Demandes d’appel – détail");
+
+  const data = res?.data;
+  console.log("DEBUG /reporting/drill/call-requests =>", data);
+
+  let items: DrillItem[] = [];
+
+  // ✅ Cas 1 : l’API renvoie directement un tableau
+  if (Array.isArray(data)) {
+    items = data as DrillItem[];
+  }
+  // ✅ Cas 2 : l’API renvoie { items: [...] }
+  else if (Array.isArray(data?.items)) {
+    items = data.items as DrillItem[];
+  }
+  // ✅ Cas 3 : certains backends renvoient { rows: [...] }
+  else if (Array.isArray(data?.rows)) {
+    items = data.rows as DrillItem[];
+  }
+
+  // ✅ Cas 4 : l’endpoint renvoie seulement { total, byDay } (agrégats)
+  if (
+    !items.length &&
+    (typeof data?.total === "number" || Array.isArray(data?.byDay))
+  ) {
+    items = [
+      {
+        leadId: "__info__",
+        leadName:
+          "L’API renvoie seulement des agrégats (total / byDay) pour les demandes d’appel. " +
+          "Le détail lead par lead n’est pas encore exposé par /reporting/drill/call-requests.",
+      } as any,
+    ];
+  }
+
+  // ✅ Si fetchSafe a créé un message d’erreur fonctionnelle
+  if (data?.__error) {
+    items.unshift({
+      leadId: "__error__",
+      leadName: data.__error,
+    } as any);
+  }
+
+  setDrillRows(items);
+  setDrillOpen(true);
+}
+
+  /** -------- Helpers UI -------- */
   const chip = (
     label: string,
     value: number,
@@ -693,9 +885,7 @@ export default function BudgetPage() {
             <div
               key={i}
               style={{ width: `${(p.value / total) * 100}%`, background: p.color }}
-              className={`h-full ${
-                p.on ? "cursor-pointer hover:opacity-80" : ""
-              }`}
+              className={`h-full ${p.on ? "cursor-pointer hover:opacity-80" : ""}`}
               onClick={p.on}
               title={`${p.label}: ${p.value}`}
             />
@@ -1172,7 +1362,6 @@ export default function BudgetPage() {
   }
 
   /** -------- Maps & agrégations -------- */
-
   const weeklySalesMap = useMemo(() => {
     const m = new Map<string, WeeklySales>();
     for (const w of weeklySales) m.set(w.weekStart, w);
@@ -1197,14 +1386,7 @@ export default function BudgetPage() {
     return m;
   }, [budgets]);
 
-  // Totaux période
-  const totalLeads = leadsTotal;
-
-  const totalSales = weeklySales.reduce(
-    (n, x) => n + (x.count || 0),
-    0
-  );
-
+  // Totaux bruts
   const rawSpendTotal = series.reduce(
     (n, x) => n + (x.spend || 0),
     0
@@ -1214,16 +1396,16 @@ export default function BudgetPage() {
     0
   );
 
-  // ✅ On identifie la semaine (lundi) correspondant à la période filtrée
-const selectedWeekStartDate =
-  appliedRange.from
-    ? startOfWeekMonday(normalizeDate(appliedRange.from)!)
-    : null;
+  // Semaine sélectionnée (lundi → dimanche)
+  const selectedWeekStartDate =
+    appliedRange.from
+      ? startOfWeekMonday(normalizeDate(appliedRange.from)!)
+      : null;
 
   const selectedWeekKey =
     selectedWeekStartDate ? toISODate(selectedWeekStartDate) : undefined;
 
-  // ✅ On récupère le budget unique de cette semaine via weekStart (lundi), peu importe la date de "mise à jour"
+  // Budget unique de la semaine filtrée
   const selectedBudgetRow: BudgetRow | undefined =
     selectedWeekKey
       ? budgets
@@ -1232,22 +1414,16 @@ const selectedWeekStartDate =
           .find((b) => b.weekStart!.slice(0, 10) === selectedWeekKey)
       : undefined;
 
-  // ✅ Budget utilisé pour tous les calculs (UNIQUEMENT la semaine filtrée)
   const totalBudgetFromBudgets = selectedBudgetRow?.amount ?? 0;
 
-  // ✅ CA vendu sur la période (CRM)
   const totalCaVendu =
     weeklySales.reduce((n, w) => n + (w.revenue || 0), 0) ||
     rawRevenueTotal;
 
-  // ✅ Budget final : si pas de budget manuel saisi, on tombe sur les dépenses réelles de la période
   const totalBudget = totalBudgetFromBudgets || rawSpendTotal;
-
-  // ✅ CA encaissé pour la semaine filtrée (si tu veux t’en servir plus tard)
   const totalCashIn = selectedBudgetRow?.caEncaisse ?? 0;
 
-
-  // ✅ Totaux ops pour la période (RV0 faits, RV1 planifiés, RV1 faits)
+  // Totaux ops pour la période
   const opsTotals = useMemo(
     () =>
       ops.reduce(
@@ -1256,7 +1432,6 @@ const selectedWeekStartDate =
           acc.rv1Planned += w.rv1Planned || 0;
           acc.rv1Honored += w.rv1Honored || 0;
           acc.callRequests += w.callRequests || 0;
-
           return acc;
         },
         { rv0Honored: 0, rv1Planned: 0, rv1Honored: 0, callRequests: 0 }
@@ -1264,50 +1439,51 @@ const selectedWeekStartDate =
     [ops]
   );
 
-  // On considère les leads comme des demandes d'appel sur cette vue
-  const totalCallRequests = opsTotals.callRequests;
+  // ✅ Totaux période basés sur funnel (avec fallback)
+  const totalCallRequests =
+    funnelTotals.CALL_REQUESTED || opsTotals.callRequests || 0;
 
-      // ✅ Coût / demande d’appel = budget / nb de demandes
+  const totalLeads =
+    funnelTotals.LEADS_RECEIVED || leadsTotal || 0;
+
+  const totalSales = weeklySales.reduce(
+    (n, x) => n + (x.count || 0),
+    0
+  );
+
+  // KPIs coûts & ROAS
   const costPerCallRequest =
-  totalCallRequests > 0 ? totalBudget / totalCallRequests : null;
+    totalCallRequests > 0 ? totalBudget / totalCallRequests : null;
 
-  // ✅ CPL global = Budget / nb de leads sur la période
   const cplGlobal =
     totalLeads > 0 ? totalBudget / totalLeads : null;
 
-  // ✅ Coût / RV0 fait = Budget / nb de RV0 faits
   const costPerRv0Honored =
     opsTotals.rv0Honored > 0
       ? totalBudget / opsTotals.rv0Honored
       : null;
 
-  // ✅ Coût / RV1 planifié
   const costPerRv1Planned =
     opsTotals.rv1Planned > 0
       ? totalBudget / opsTotals.rv1Planned
       : null;
 
-  // ✅ Coût / RV1 fait
   const costPerRv1Honored =
     opsTotals.rv1Honored > 0
       ? totalBudget / opsTotals.rv1Honored
       : null;
 
-  // ✅ Coût / Vente
   const costPerSale =
     totalSales > 0 ? totalBudget / totalSales : null;
 
-  // ✅ ROAS vendu
   const roasVendu =
     totalBudget > 0 ? totalCaVendu / totalBudget : null;
 
-  // ✅ Profit = CA vendu (CRM) - budget
   const profit = totalCaVendu - totalBudget;
 
   const accountingRows = useMemo(() => {
     const weekKeys = new Set<string>();
 
-    // On prend toutes les semaines présentes dans au moins une source
     for (const s of series) weekKeys.add(s.weekStart);
     for (const o of ops) weekKeys.add(o.weekStart);
     for (const b of budgets) {
@@ -1317,14 +1493,12 @@ const selectedWeekStartDate =
     }
     for (const w of weeklySales) weekKeys.add(w.weekStart);
 
-  const selectedKey =
-  appliedRange.from
-    ? toISODate(startOfWeekMonday(normalizeDate(appliedRange.from)!))
-    : undefined;
-
+    const selectedKey =
+      appliedRange.from
+        ? toISODate(startOfWeekMonday(normalizeDate(appliedRange.from)!))
+        : undefined;
 
     return Array.from(weekKeys)
-      // ✅ On ne garde que la semaine sur laquelle le filtre travaille
       .filter((ws) => !selectedKey || ws.slice(0, 10) === selectedKey)
       .sort((a, b) => a.localeCompare(b))
       .map((ws) => {
@@ -1352,7 +1526,7 @@ const selectedWeekStartDate =
 
         const rv1Planned = opsWeek?.rv1Planned ?? 0;
         const rv1Honored = opsWeek?.rv1Honored ?? 0;
-        const callRequests = opsWeek?.callRequests ?? 0;
+        const callRequestsWeek = opsWeek?.callRequests ?? 0;
 
         const salesCount = salesWeek?.count ?? s?.wonCount ?? 0;
         const caVendu = salesWeek?.revenue ?? s?.revenue ?? 0;
@@ -1361,8 +1535,8 @@ const selectedWeekStartDate =
         const caEncaisse = budgetWeek?.caEncaisse ?? null;
 
         const cpl =
-          callRequests > 0 && budgetAmount > 0
-            ? budgetAmount / callRequests
+          callRequestsWeek > 0 && budgetAmount > 0
+            ? budgetAmount / callRequestsWeek
             : null;
         const costPerRv1Hon =
           rv1Honored > 0 && budgetAmount > 0
@@ -1382,7 +1556,7 @@ const selectedWeekStartDate =
           weekEnd: we,
           label,
           budgetAmount,
-          callRequests,
+          callRequests: callRequestsWeek,
           rv0Planned,
           rv0Honored,
           rv1Planned,
@@ -1465,7 +1639,6 @@ const selectedWeekStartDate =
           ],
           []
         ),
-        // ✅ Après enregistrement, on recharge à nouveau TOUS les budgets (pas filtrés par from/to)
         tryGet<any>(
           [
             {
@@ -1624,7 +1797,7 @@ const selectedWeekStartDate =
             LoadingSkeleton
           ) : (
             <>
-              {/* ✅ ICI : BUDGET PANEL SIMPLE (une carte avec saisie de budget + mini KPIs) */}
+              {/* ✅ PANEL BUDGET SIMPLE */}
               <BudgetPanel />
 
               {/* KPIs global période */}
@@ -1654,15 +1827,36 @@ const selectedWeekStartDate =
                   </div>
                 </div>
 
-                {/* Demandes d’appel (période) */}
-                  <div className="card">
-                    <div className="text-[10px] uppercase tracking-wide text-[--muted]">
-                      Demandes d’appel (période)
-                    </div>
-                    <div className="mt-1 text-2xl font-semibold">
-                      {fmtInt(totalCallRequests)}
-                    </div>
+                {/* 🔥 Demandes d’appel (période) – même chiffre que dashboard */}
+                <div className="card">
+                  <div className="text-[10px] uppercase tracking-wide text-[--muted]">
+                    Demandes d’appel (période)
                   </div>
+                  <div className="mt-1 flex flex-col gap-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-semibold">
+                        {fmtInt(totalCallRequests)}
+                      </span>
+                      {/*<button
+                        type="button"
+                        onClick={openCallRequestsDrill}
+                        className="ml-auto text-[11px] text-sky-300 hover:text-sky-200"
+                      >
+                        Voir le détail
+                      </button>*/}
+                    </div>
+                    {funnelLoading && (
+                      <div className="text-[11px] text-[--muted]">
+                        Chargement des métriques du funnel…
+                      </div>
+                    )}
+                    {funnelError && (
+                      <div className="text-[11px] text-rose-300">
+                        Erreur funnel : {String(funnelError)}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 {/* CA vendu (CRM) */}
                 <div
@@ -1677,7 +1871,7 @@ const selectedWeekStartDate =
                   </div>
                 </div>
 
-                {/* Profit = CA vendu - budget */}
+                {/* Profit */}
                 <div className="card">
                   <div className="text-[10px] uppercase tracking-wide text-[--muted]">
                     Profit (CA vendu - budget)
@@ -1740,7 +1934,7 @@ const selectedWeekStartDate =
                   </div>
                 </div>
 
-                {/* Coût par demande d’appel */}
+                {/* Coût / demande d’appel */}
                 <div className="card">
                   <div className="text-[10px] uppercase tracking-wide text-[--muted]">
                     Coût / demande d’appel
@@ -1749,7 +1943,8 @@ const selectedWeekStartDate =
                     {fmtMaybeEUR(costPerCallRequest)}
                   </div>
                   <div className="mt-1 text-[11px] text-[--muted]">
-                    Basé sur le budget pub et le nombre total de demandes d’appel.
+                    Basé sur le budget pub et le nombre total de demandes d’appel
+                    (mêmes chiffres que le dashboard).
                   </div>
                 </div>
 
@@ -1812,7 +2007,7 @@ const selectedWeekStartDate =
                 )}
               </div>
 
-              {/* Tableau hebdo pour la comptable */}
+              {/* Tableau hebdo comptable */}
               {supportsBudgetPost && (
                 <div className="card">
                   <div className="mb-2 font-medium">
