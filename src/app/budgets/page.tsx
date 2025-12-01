@@ -537,7 +537,7 @@ export default function BudgetPage() {
           { total: 0 }
         );
 
-        const CR = callReqGet.data as CallRequestsOut | any;
+       const CR = callReqGet.data as CallRequestsOut | any;
 
         const callRequestsTotalComputed =
           (typeof CR?.total === "number" ? CR.total : 0) ||
@@ -1660,7 +1660,7 @@ const selectedWeekStartDate =
                     Demandes d’appel (période)
                   </div>
                   <div className="mt-1 text-2xl font-semibold">
-                    {fmtInt(opsTotals.callRequests)}
+                    {fmtInt(totalCallRequests)}
                   </div>
                 </div>
 
