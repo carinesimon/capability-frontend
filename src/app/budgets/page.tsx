@@ -1205,9 +1205,6 @@ export default function BudgetPage() {
     0
   );
 
-    // On considère les leads comme des demandes d'appel sur cette vue
-  const totalCallRequests = callRequestsTotal;
-
   const rawSpendTotal = series.reduce(
     (n, x) => n + (x.spend || 0),
     0
@@ -1249,10 +1246,6 @@ const selectedWeekStartDate =
   // ✅ CA encaissé pour la semaine filtrée (si tu veux t’en servir plus tard)
   const totalCashIn = selectedBudgetRow?.caEncaisse ?? 0;
 
-    // ✅ Coût / demande d’appel = budget / nb de demandes
-  const costPerCallRequest =
-    totalCallRequests > 0 ? totalBudget / totalCallRequests : null;
-
 
   // ✅ Totaux ops pour la période (RV0 faits, RV1 planifiés, RV1 faits)
   const opsTotals = useMemo(
@@ -1270,6 +1263,13 @@ const selectedWeekStartDate =
       ),
     [ops]
   );
+
+  // On considère les leads comme des demandes d'appel sur cette vue
+  const totalCallRequests = opsTotals.callRequests;
+
+      // ✅ Coût / demande d’appel = budget / nb de demandes
+  const costPerCallRequest =
+  totalCallRequests > 0 ? totalBudget / totalCallRequests : null;
 
   // ✅ CPL global = Budget / nb de leads sur la période
   const cplGlobal =
