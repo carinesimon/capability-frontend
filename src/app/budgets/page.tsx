@@ -523,7 +523,7 @@ export default function BudgetPage() {
         }
 
         // ====== Demandes d’appel sur la période =====
-        const callReqGet = await tryGet<any>(
+   /*     const callReqGet = await tryGet<any>(
           [
             {
               url: "/reporting/call-requests",
@@ -550,7 +550,7 @@ export default function BudgetPage() {
 
         if (!cancelled) {
           setCallRequestsTotal(callRequestsTotalComputed);
-        }
+        }*/
 
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Erreur de chargement");
@@ -1654,15 +1654,15 @@ const selectedWeekStartDate =
                   </div>
                 </div>
 
-                {/* Demandes d’appel + coût moyen */}
-                <div className="card">
-                  <div className="text-[10px] uppercase tracking-wide text-[--muted]">
-                    Demandes d’appel (période)
+                {/* Demandes d’appel (période) */}
+                  <div className="card">
+                    <div className="text-[10px] uppercase tracking-wide text-[--muted]">
+                      Demandes d’appel (période)
+                    </div>
+                    <div className="mt-1 text-2xl font-semibold">
+                      {fmtInt(totalCallRequests)}
+                    </div>
                   </div>
-                  <div className="mt-1 text-2xl font-semibold">
-                    {fmtInt(totalCallRequests)}
-                  </div>
-                </div>
 
                 {/* CA vendu (CRM) */}
                 <div
