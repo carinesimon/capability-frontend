@@ -1,5 +1,6 @@
 // src/lib/reporting.ts
 import api from "@/lib/api";
+import { reportingGet } from "@/lib/reportingApi";
 
 /** ---- Types alignés au backend ---- */
 export type LeadsReceivedOut = {
@@ -66,21 +67,17 @@ export type SpotlightCloserRow = {
 };
 
 export async function getSpotlightSetters(from?: string, to?: string): Promise<SpotlightSetterRow[]> {
-  const q = new URLSearchParams();
-  if (from) q.set('from', from);
-  if (to) q.set('to', to);
-  const res = await fetch(`/reporting/spotlight-setters?${q.toString()}`);
-  if (!res.ok) throw new Error('Failed to fetch spotlight setters');
-  return res.json();
+  const res = await reportingGet<SpotlightSetterRow[]>("/reporting/spotlight-setters", {
+    params: { from, to },
+  });
+  return res.data;
 }
 
 export async function getSpotlightClosers(from?: string, to?: string): Promise<SpotlightCloserRow[]> {
-  const q = new URLSearchParams();
-  if (from) q.set('from', from);
-  if (to) q.set('to', to);
-  const res = await fetch(`/reporting/spotlight-closers?${q.toString()}`);
-  if (!res.ok) throw new Error('Failed to fetch spotlight closers');
-  return res.json();
+  const res = await reportingGet<SpotlightCloserRow[]>("/reporting/spotlight-closers", {
+    params: { from, to },
+  });
+  return res.data;
 }
 
 
@@ -104,23 +101,24 @@ function mergeByDay(keys: string[], seriesMap: Record<string, Array<{ day: strin
 export const reportingApi = {
   /** Tous ces endpoints acceptent maintenant le fuseau IANA (tz) */
   leadsReceived: (from?: string, to?: string, tz?: string) =>
-    api.get<LeadsReceivedOut>("/reporting/leads-received", { params: { from, to, tz } }).then(r => r.data),
+    reportingGet<LeadsReceivedOut>("/reporting/leads-received", { params: { from, to, tz } }).then(r => r.data),
 
   salesTotal: (from?: string, to?: string, tz?: string) =>
-    api.get<SalesTotalOut>("/reporting/sales-total", { params: { from, to, tz } }).then(r => r.data),
+    reportingGet<SalesTotalOut>("/reporting/sales-total", { params: { from, to, tz } }).then(r => r.data),
 
   salesWeekly: (from?: string, to?: string, tz?: string) =>
-    api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", { params: { from, to, tz } }).then(r => r.data),
+    reportingGet<SalesWeeklyItem[]>("/reporting/sales-weekly", { params: { from, to, tz } }).then(r => r.data),
 
   summary: (from?: string, to?: string, tz?: string) =>
-    api.get<SummaryOut>("/reporting/summary", { params: { from, to, tz } }).then(r => r.data),
+    reportingGet<SummaryOut>("/reporting/summary", { params: { from, to, tz } }).then(r => r.data),
 
   listBudgets: (from?: string, to?: string, tz?: string) =>
-    api
-      .get<Array<{ id: string; weekStart: string; amount: number }>>("/reporting/budget", {
+    reportingGet<Array<{ id: string; weekStart: string; amount: number }>>(
+      "/reporting/budget",
+      {
         params: { from, to, tz },
-      })
-      .then(r => r.data),
+      }
+    ).then(r => r.data),
 
   upsertWeeklyBudget: (weekStartISO: string, amount: number) =>
     api.post("/reporting/budget", { weekStartISO, amount }),
@@ -132,9 +130,9 @@ export const reportingApi = {
    * Exemples de stage : "RV0_CANCELED", "RV1_CANCELED", "RV2_CANCELED", "CALL_REQUESTED", ...
    */
   stageSeries: (stage: string, from?: string, to?: string, tz?: string) =>
-    api
-      .get<MetricSeriesOut>("/metrics/stage-series", { params: { stage, from, to, tz } })
-      .then(r => r.data),
+    reportingGet<MetricSeriesOut>("/metrics/stage-series", {
+      params: { stage, from, to, tz },
+    }).then(r => r.data),
 
   /**
    * Annulés par jour (un seul graphe) : renvoie un tableau
@@ -143,9 +141,9 @@ export const reportingApi = {
    */
   canceledDaily: async (from?: string, to?: string, tz?: string) => {
     const [rv0, rv1, rv2] = await Promise.all([
-      api.get<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV0_CANCELED", from, to, tz } }),
-      api.get<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV1_CANCELED", from, to, tz } }),
-      api.get<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV2_CANCELED", from, to, tz } }),
+      reportingGet<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV0_CANCELED", from, to, tz } }),
+      reportingGet<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV1_CANCELED", from, to, tz } }),
+      reportingGet<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV2_CANCELED", from, to, tz } }),
     ]);
 
     const data = mergeByDay(

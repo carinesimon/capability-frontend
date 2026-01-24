@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import { currentMonthRange } from "@/lib/date";
 import Sidebar from "@/components/Sidebar";
@@ -13,7 +13,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { getAccessToken } from "@/lib/auth";
 import Clock from "@/components/Clock";
 import PdfExports from "@/components/PdfExports";
-import { reportingApi } from "@/lib/reporting";
+import { reportingGet } from "@/lib/reportingApi";
+import {
+  applyReportingFiltersToSearchParams,
+  normalizeReportingFilters,
+  parseReportingFiltersFromSearchParams,
+  setReportingFilters,
+  useReportingFilters,
+} from "@/lib/reportingFilters";
 import {
   BarChart,
   Bar,
@@ -27,6 +34,7 @@ import {
   Legend,
 } from "recharts";
 import { useFunnelMetrics } from "@/hooks/useFunnelMetrics";
+import { useReportingFilterOptions } from "@/hooks/useReportingFilterOptions";
 
 const TIMEZONES = [
   "Europe/Paris",
@@ -252,6 +260,10 @@ function toISODate(d: Date | string) {
   const day = String(dd.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+function toDateString(value?: Date | string | null) {
+  if (!value) return undefined;
+  return typeof value === "string" ? value : toISODate(value);
+}
 const fmtInt = (n: number) => Math.round(n).toLocaleString("fr-FR");
 const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
 const fmtPct = (num?: number | null, den?: number | null) =>
@@ -326,6 +338,10 @@ type DrillItem = {
   stage?: string;
   createdAt?: string;
   stageUpdatedAt?: string;
+};
+type DrillResponse = {
+  items?: DrillItem[];
+  __error?: string;
 };
 function DrillModal({
   title,
@@ -987,7 +1003,9 @@ function normalizeTotals(
 /* ============================= PAGE ============================= */
 export default function DashboardPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const search = useSearchParams();
+  const filterInitRef = useRef(false);
   const view = (search.get("view") || "home") as
     | "home"
     | "closers"
@@ -996,23 +1014,99 @@ export default function DashboardPage() {
     | "users"
     | "exports";
 
+  const {
+    from,
+    to,
+    tz,
+    sourcesInclude,
+    sourcesExclude,
+    setterIds,
+    closerIds,
+  } = useReportingFilters();
+  const {
+    options: filterOptions,
+    loading: filterOptionsLoading,
+    error: filterOptionsError,
+  } = useReportingFilterOptions();
+  const filterKey = useMemo(
+    () =>
+      [
+        sourcesInclude.join(","),
+        sourcesExclude.join(","),
+        setterIds.join(","),
+        closerIds.join(","),
+      ].join("|"),
+    [sourcesInclude, sourcesExclude, setterIds, closerIds]
+  );
+
   const { from: defaultFrom, to: defaultTo } = useMemo(
     () => currentMonthRange(),
     []
   );
-  const [range, setRange] = useState<Range>({
-    from: defaultFrom,
-    to: defaultTo,
-  });
-  const [draftRange, setDraftRange] = useState<Range>({
-    from: defaultFrom,
-    to: defaultTo,
-  });
-
-    // Timezone sélectionné (affichage + agrégations serveur)
-  const [tz, setTz] = useState<string>("Europe/Paris");
-
+  const range = useMemo<Range>(
+    () => ({
+      from: from ?? defaultFrom,
+      to: to ?? defaultTo,
+    }),
+    [from, to, defaultFrom, defaultTo]
+  );
+  const [draftRange, setDraftRange] = useState<Range>(range);
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  useEffect(() => {
+    if (filterInitRef.current) return;
+    const parsed = parseReportingFiltersFromSearchParams(
+      new URLSearchParams(search.toString())
+    );
+    setReportingFilters(normalizeReportingFilters(parsed));
+    filterInitRef.current = true;
+  }, [search]);
+
+  useEffect(() => {
+    if (!from || !to) {
+      setReportingFilters({
+        from: from ?? defaultFrom,
+        to: to ?? defaultTo,
+      });
+    }
+  }, [from, to, defaultFrom, defaultTo]);
+
+  useEffect(() => {
+    if (!filtersOpen) {
+      setDraftRange(range);
+    }
+  }, [range, filtersOpen]);
+
+  useEffect(() => {
+    if (!filterInitRef.current) return;
+    const params = new URLSearchParams(search.toString());
+    applyReportingFiltersToSearchParams(params, {
+      from: toDateString(range.from),
+      to: toDateString(range.to),
+      tz,
+      sourcesInclude,
+      sourcesExclude,
+      setterIds,
+      closerIds,
+    });
+    const next = params.toString();
+    const current = search.toString();
+    if (next !== current) {
+      router.replace(`${pathname}?${next}`, { scroll: false });
+    }
+  }, [
+    pathname,
+    router,
+    search,
+    range.from,
+    range.to,
+    tz,
+    sourcesInclude,
+    sourcesExclude,
+    setterIds,
+    closerIds,
+  ]);
+
   const [funnelOpen, setFunnelOpen] = useState(false);
   const [comparePrev, setComparePrev] =
     useState<boolean>(true);
@@ -1027,6 +1121,53 @@ export default function DashboardPage() {
     () => asDate(range.to) ?? new Date(),
     [range.to]
   );
+  const sourceOptions = useMemo(
+    () => Array.from(new Set(filterOptions.sources)).sort(),
+    [filterOptions.sources]
+  );
+  const setterOptions = useMemo(
+    () =>
+      [...filterOptions.setters].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      ),
+    [filterOptions.setters]
+  );
+  const closerOptions = useMemo(
+    () =>
+      [...filterOptions.closers].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      ),
+    [filterOptions.closers]
+  );
+
+  const toggleListValue = (list: string[], value: string) =>
+    list.includes(value)
+      ? list.filter((item) => item !== value)
+      : [...list, value];
+
+  const toggleSourceInclude = (value: string) => {
+    const isSelected = sourcesInclude.includes(value);
+    setReportingFilters({
+      sourcesInclude: isSelected
+        ? sourcesInclude.filter((item) => item !== value)
+        : [...sourcesInclude, value],
+      sourcesExclude: isSelected
+        ? sourcesExclude
+        : sourcesExclude.filter((item) => item !== value),
+    });
+  };
+
+  const toggleSourceExclude = (value: string) => {
+    const isSelected = sourcesExclude.includes(value);
+    setReportingFilters({
+      sourcesExclude: isSelected
+        ? sourcesExclude.filter((item) => item !== value)
+        : [...sourcesExclude, value],
+      sourcesInclude: isSelected
+        ? sourcesInclude
+        : sourcesInclude.filter((item) => item !== value),
+    });
+  };
 
   // ========= FUNNEL METRICS (pour les tuiles + Funnel) =========
 const { data: funnelRaw = {}, loading: funnelLoading, error: funnelError } =
@@ -1183,7 +1324,7 @@ const neutralKpiCell =
     params: Record<string, any>
   ) {
     try {
-      return await api.get<MetricSeriesOut>(url, {
+      return await reportingGet<MetricSeriesOut>(url, {
         params,
       });
     } catch {
@@ -1233,10 +1374,19 @@ const neutralKpiCell =
 
         // 1) Résumés & séries hebdo
         const [sumRes, leadsRes, weeklyRes, opsRes] = await Promise.all([
-          api.get<SummaryOut>("/reporting/summary", { params: { from: fromISO, to: toISO, tz, } }),
-          api.get<LeadsReceivedOut>("/metrics/leads-by-day", { params: { from: fromISO, to: toISO, tz, } }),
-          api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", { params: { from: fromISO, to: toISO, tz, } }),
-          api.get<{ ok: true; rows: WeeklyOpsRow[] }>("/reporting/weekly-ops", { params: { from: fromISO, to: toISO, tz, } }),
+          reportingGet<SummaryOut>("/reporting/summary", {
+            params: { from: fromISO, to: toISO, tz },
+          }),
+          reportingGet<LeadsReceivedOut>("/metrics/leads-by-day", {
+            params: { from: fromISO, to: toISO, tz },
+          }),
+          reportingGet<SalesWeeklyItem[]>("/reporting/sales-weekly", {
+            params: { from: fromISO, to: toISO, tz },
+          }),
+          reportingGet<{ ok: true; rows: WeeklyOpsRow[] }>(
+            "/reporting/weekly-ops",
+            { params: { from: fromISO, to: toISO, tz } }
+          ),
         ]);
 
         if (cancelled) return;
@@ -1272,9 +1422,12 @@ const neutralKpiCell =
         }
 
         // 3) RV0 no-show par semaine, à partir de StageEvent(RV0_NO_SHOW) → /metrics/stage-series
-        const rv0SeriesRes = await api.get<MetricSeriesOut>("/metrics/stage-series", {
-          params: { from: fromISO, to: toISO, stage: "RV0_NO_SHOW" },
-        });
+        const rv0SeriesRes = await reportingGet<MetricSeriesOut>(
+          "/metrics/stage-series",
+          {
+            params: { from: fromISO, to: toISO, stage: "RV0_NO_SHOW" },
+          }
+        );
         const series = rv0SeriesRes.data?.byDay || [];
 
         // Helpers semaine (UTC, lundi → dimanche)
@@ -1347,7 +1500,7 @@ const neutralKpiCell =
     return () => {
       cancelled = true;
     };
-  }, [authChecked, authError, fromISO, toISO, tz]);
+  }, [authChecked, authError, fromISO, toISO, tz, filterKey]);
 
   
   // Classements (setters / closers)
@@ -1363,8 +1516,8 @@ useEffect(() => {
     try {
       // 1) Tentative endpoints spotlight
       const [sRes, cRes] = await Promise.all([
-        api.get<SetterRow[]>("/reporting/spotlight-setters", { params }),
-        api.get<CloserRow[]>("/reporting/spotlight-closers", { params }),
+        reportingGet<SetterRow[]>("/reporting/spotlight-setters", { params }),
+        reportingGet<CloserRow[]>("/reporting/spotlight-closers", { params }),
       ]);
 
       if (cancelled) return;
@@ -1432,8 +1585,8 @@ useEffect(() => {
     // 2) Fallback anciens endpoints
     try {
       const [sRes2, cRes2] = await Promise.all([
-        api.get<any[]>("/reporting/setters", { params }),
-        api.get<any[]>("/reporting/closers", { params }),
+        reportingGet<any[]>("/reporting/setters", { params }),
+        reportingGet<any[]>("/reporting/closers", { params }),
       ]);
       if (cancelled) return;
 
@@ -1566,7 +1719,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [authChecked, authError, fromISO, toISO, tz]);
+}, [authChecked, authError, fromISO, toISO, tz, filterKey]);
 
 
  // (NOUVEAU) Annulés par jour via historisation (StageEvent)
@@ -1659,7 +1812,7 @@ useEffect(() => {
 
     async function loadDuos() {
       try {
-        const res = await api.get<{ ok?: boolean; rows?: DuoRow[] }>(
+        const res = await reportingGet<{ ok?: boolean; rows?: DuoRow[] }>(
           "/reporting/duos",
           { params: { from: fromISO, to: toISO, tz, } }
         );
@@ -1687,7 +1840,7 @@ useEffect(() => {
 
     loadDuos();
     return () => { cancelled = true; };
-  }, [authChecked, authError, fromISO, toISO, tz]);
+  }, [authChecked, authError, fromISO, toISO, tz, filterKey]);
 
   // Enrichissements (taux) — pas de hooks conditionnels
   const settersWithRates = useMemo(() => {
@@ -1844,21 +1997,20 @@ const kpiSales = summary?.totals?.salesCount ?? 0;
           prevTo.getTime() - span
         );
         const [sum, leads] = await Promise.all([
-          api.get<SummaryOut>("/reporting/summary", {
+          reportingGet<SummaryOut>("/reporting/summary", {
             params: {
               from: toISODate(prevFrom),
-              to: toISODate(prevTo), tz,
+              to: toISODate(prevTo),
+              tz,
             },
           }),
-          api.get<LeadsReceivedOut>(
-            "/reporting/leads-received",
-            {
-              params: {
-                from: toISODate(prevFrom),
-                to: toISODate(prevTo), tz,
-              },
-            }
-          ),
+          reportingGet<LeadsReceivedOut>("/reporting/leads-received", {
+            params: {
+              from: toISODate(prevFrom),
+              to: toISODate(prevTo),
+              tz,
+            },
+          }),
         ]);
         setSummaryPrev(sum.data || null);
         setLeadsPrev(leads.data || null);
@@ -1867,7 +2019,7 @@ const kpiSales = summary?.totals?.salesCount ?? 0;
         setLeadsPrev(null);
       }
     })();
-  }, [comparePrev, fromISO, toISO]);
+  }, [comparePrev, fromISO, toISO, tz, filterKey]);
   const kpiRevenuePrev = summaryPrev?.totals?.revenue ?? 0;
   const kpiLeadsPrev = leadsPrev?.total ?? 0;
   const kpiRv1HonoredPrev =
@@ -1926,7 +2078,7 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
     return () => {
       cancelled = true;
     };
-  }, [fromISO, toISO, tz]);
+  }, [fromISO, toISO, tz, filterKey]);
 
 
 useEffect(() => {
@@ -2002,7 +2154,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [fromISO, toISO, tz]);
+}, [fromISO, toISO, tz, filterKey]);
 
   // ======= DRILLS : helpers endpoints =======
   async function openAppointmentsDrill(params: {
@@ -2017,7 +2169,7 @@ useEffect(() => {
     from?: string;
     to?: string;
   }) {
-    const res = await api.get(
+    const res = await reportingGet<DrillResponse>(
       "/reporting/drill/appointments",
       {
         params: {
@@ -2039,7 +2191,7 @@ useEffect(() => {
     params: Record<string, any>
   ) {
     try {
-      return await api.get(url, { params });
+      return await reportingGet<DrillResponse>(url, { params });
     } catch (e: any) {
       return {
         data: {
@@ -2136,7 +2288,7 @@ useEffect(() => {
 async function fetchStageSeriesAny(stage: string, params: any) {
   const list = STAGE_SYNONYMS[stage] ?? [stage];
   const results = await Promise.all(
-    list.map(s => api.get<MetricSeriesOut>("/metrics/stage-series", {
+    list.map(s => reportingGet<MetricSeriesOut>("/metrics/stage-series", {
       params: { ...params, stage: s },
     }).catch(() => ({ data: null } as any)))
   );
@@ -2197,7 +2349,7 @@ function KpiBox({
   const onFunnelCardClick = async (key: FunnelKey): Promise<void> => {
   switch (key) {
     case "leads": {
-      const res = await api.get("/reporting/drill/leads-received", {
+      const res = await reportingGet<DrillResponse>("/reporting/drill/leads-received", {
         params: {
           from: fromISO,
           to: toISO,
@@ -2272,7 +2424,7 @@ function KpiBox({
       });
 
     case "wonCount": {
-      const res = await api.get("/reporting/drill/won", {
+      const res = await reportingGet<DrillResponse>("/reporting/drill/won", {
         params: {
           from: fromISO,
           to: toISO,
@@ -2380,7 +2532,9 @@ function KpiBox({
             <select
               className="text-xs rounded-xl border border-white/10 bg-white/[0.03] px-2 py-1 focus:outline-none"
               value={tz}
-              onChange={(e) => setTz(e.target.value)}
+              onChange={(e) =>
+                setReportingFilters({ tz: e.target.value })
+              }
               title="Fuseau horaire d’agrégation"
             >
               {TIMEZONES.map(z => (
@@ -4437,7 +4591,7 @@ function KpiBox({
                   type="button"
                   className="btn btn-primary"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-setters.pdf`, {
+                    const res = await reportingGet<Blob>(`/reporting/export/spotlight-setters.pdf`, {
                       params: { from: fromISO, to: toISO, tz },
                       responseType: 'blob',
                     });
@@ -4456,7 +4610,7 @@ function KpiBox({
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-setters.csv`, {
+                    const res = await reportingGet<Blob>(`/reporting/export/spotlight-setters.csv`, {
                       params: { from: fromISO, to: toISO, tz },
                       responseType: 'blob',
                     });
@@ -4477,7 +4631,7 @@ function KpiBox({
                   type="button"
                   className="btn btn-primary"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-closers.pdf`, {
+                    const res = await reportingGet<Blob>(`/reporting/export/spotlight-closers.pdf`, {
                       params: { from: fromISO, to: toISO, tz },
                       responseType: 'blob',
                     });
@@ -4496,7 +4650,7 @@ function KpiBox({
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-closers.csv`, {
+                    const res = await reportingGet<Blob>(`/reporting/export/spotlight-closers.csv`, {
                       params: { from: fromISO, to: toISO, tz },
                       responseType: 'blob',
                     });
@@ -4662,6 +4816,149 @@ function KpiBox({
                   />
                 </div>
 
+                <div>
+                  <div className="label">Sources</div>
+                  {Boolean(filterOptionsError) && (
+                    <div className="text-xs text-red-300">
+                      Impossible de charger les options de filtre.
+                    </div>
+                  )}
+                  {filterOptionsLoading ? (
+                    <div className="text-xs text-[--muted]">
+                      Chargement des sources…
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <div className="text-[11px] uppercase text-[--muted]">
+                          Inclure
+                        </div>
+                        <div className="max-h-40 space-y-1 overflow-auto pr-1">
+                          {sourceOptions.length === 0 ? (
+                            <div className="text-xs text-[--muted]">
+                              Aucune source disponible.
+                            </div>
+                          ) : (
+                            sourceOptions.map((source) => (
+                              <label
+                                key={`source-include-${source}`}
+                                className="flex items-center gap-2 text-xs"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={sourcesInclude.includes(source)}
+                                  onChange={() => toggleSourceInclude(source)}
+                                />
+                                <span>{source}</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-[11px] uppercase text-[--muted]">
+                          Exclure
+                        </div>
+                        <div className="max-h-40 space-y-1 overflow-auto pr-1">
+                          {sourceOptions.length === 0 ? (
+                            <div className="text-xs text-[--muted]">
+                              Aucune source disponible.
+                            </div>
+                          ) : (
+                            sourceOptions.map((source) => (
+                              <label
+                                key={`source-exclude-${source}`}
+                                className="flex items-center gap-2 text-xs"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={sourcesExclude.includes(source)}
+                                  onChange={() => toggleSourceExclude(source)}
+                                />
+                                <span>{source}</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="label">Setters</div>
+                    <div className="max-h-48 space-y-1 overflow-auto pr-1">
+                      {filterOptionsLoading ? (
+                        <div className="text-xs text-[--muted]">
+                          Chargement des setters…
+                        </div>
+                      ) : setterOptions.length === 0 ? (
+                        <div className="text-xs text-[--muted]">
+                          Aucun setter disponible.
+                        </div>
+                      ) : (
+                        setterOptions.map((setter) => (
+                          <label
+                            key={`setter-${setter.id}`}
+                            className="flex items-center gap-2 text-xs"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={setterIds.includes(setter.id)}
+                              onChange={() =>
+                                setReportingFilters({
+                                  setterIds: toggleListValue(
+                                    setterIds,
+                                    setter.id
+                                  ),
+                                })
+                              }
+                            />
+                            <span>{setter.name}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="label">Closers</div>
+                    <div className="max-h-48 space-y-1 overflow-auto pr-1">
+                      {filterOptionsLoading ? (
+                        <div className="text-xs text-[--muted]">
+                          Chargement des closers…
+                        </div>
+                      ) : closerOptions.length === 0 ? (
+                        <div className="text-xs text-[--muted]">
+                          Aucun closer disponible.
+                        </div>
+                      ) : (
+                        closerOptions.map((closer) => (
+                          <label
+                            key={`closer-${closer.id}`}
+                            className="flex items-center gap-2 text-xs"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={closerIds.includes(closer.id)}
+                              onChange={() =>
+                                setReportingFilters({
+                                  closerIds: toggleListValue(
+                                    closerIds,
+                                    closer.id
+                                  ),
+                                })
+                              }
+                            />
+                            <span>{closer.name}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-xs">
                     <input
@@ -4690,7 +4987,10 @@ function KpiBox({
                     type="button"
                     className="btn btn-primary"
                     onClick={() => {
-                      setRange(draftRange);
+                      setReportingFilters({
+                        from: toDateString(draftRange.from),
+                        to: toDateString(draftRange.to),
+                      });
                       setFiltersOpen(false);
                     }}
                   >

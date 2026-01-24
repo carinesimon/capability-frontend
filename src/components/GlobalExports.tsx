@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import api from "@/lib/api";
+import { reportingGet } from "@/lib/reportingApi";
 
 type Props = {
   from?: string;
@@ -10,15 +10,12 @@ type Props = {
 };
 
 function buildParams(from?: string, to?: string) {
-  const p = new URLSearchParams();
-  if (from) p.set("from", from);
-  if (to) p.set("to", to);
-  return p.toString();
+  return { from, to };
 }
 
 export default function GlobalExports({ from, to }: Props) {
   const [loading, setLoading] = useState<string | null>(null);
-  const qs = buildParams(from, to);
+  const params = buildParams(from, to);
 
   return (
     <div className="card">
@@ -39,7 +36,8 @@ export default function GlobalExports({ from, to }: Props) {
           onClick={async () => {
             try {
               setLoading("csv");
-              const res = await api.get(`/reporting/summary.csv?${qs}`, {
+              const res = await reportingGet<ArrayBuffer>(`/reporting/summary.csv`, {
+                params,
                 responseType: "arraybuffer",
               });
               const blob = new Blob([res.data], { type: "text/csv;charset=utf-8" });
@@ -66,7 +64,9 @@ export default function GlobalExports({ from, to }: Props) {
           onClick={async () => {
             try {
               setLoading("json");
-              const res = await api.get(`/reporting/summary?${qs}`);
+              const res = await reportingGet<unknown>(`/reporting/summary`, {
+                params,
+              });
               const blob = new Blob([JSON.stringify(res.data, null, 2)], {
                 type: "application/json",
               });

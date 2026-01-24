@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
+import { reportingGet } from "@/lib/reportingApi";
 import { motion } from "framer-motion";
 
 type Budget = {
@@ -62,7 +63,7 @@ export default function BudgetPanel() {
   async function load() {
     setLoading(true); setMsg(null);
     try {
-      const res = await api.get<Budget[]>("/reporting/budget");
+      const res = await reportingGet<Budget[]>("/reporting/budget");
       setList(res.data || []);
     } catch (e: any) {
       setMsg(e?.response?.data?.message || "Erreur de chargement des budgets");
@@ -78,7 +79,7 @@ export default function BudgetPanel() {
     async function loadSummary() {
       if (!minWeek || !maxWeek) { setSummary(null); return; }
       try {
-        const sRes = await api.get<SummaryOut>("/reporting/summary", {
+        const sRes = await reportingGet<SummaryOut>("/reporting/summary", {
           params: { from: minWeek, to: maxWeek },
         });
         setSummary(sRes.data || null);

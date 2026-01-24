@@ -8,6 +8,7 @@ import {
 } from "react";
 import Sidebar from "@/components/Sidebar";
 import api from "@/lib/api";
+import { reportingGet } from "@/lib/reportingApi";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 import { getAccessToken } from "@/lib/auth";
 import { useRouter } from "next/navigation";
@@ -24,11 +25,13 @@ async function tryGet<T>(
   candidates: Array<{ url: string; params?: Record<string, any> }>,
   fallback: T
 ): Promise<{ data: T; hit: string | null }> {
+  const isReportingEndpoint = (url: string) =>
+    url.startsWith("/reporting") || url.startsWith("/metrics");
   for (const c of candidates) {
     try {
-      const res = await api.get(c.url, {
-        params: c.params,
-      });
+      const res = isReportingEndpoint(c.url)
+        ? await reportingGet<T>(c.url, { params: c.params })
+        : await api.get<T>(c.url, { params: c.params });
       return { data: (res.data ?? fallback) as T, hit: c.url };
     } catch (err: any) {
       const status = err?.response?.status;
@@ -111,6 +114,10 @@ type DrillItem = {
   stage?: string;
   createdAt?: string;
   stageUpdatedAt?: string;
+};
+type DrillResponse = {
+  items?: DrillItem[];
+  __error?: string;
 };
 
 type LeadsReceivedOut = {
@@ -697,7 +704,7 @@ const funnelError =
     from?: string;
     to?: string;
   }) {
-    const res = await api.get("/reporting/drill/appointments", {
+    const res = await reportingGet<DrillResponse>("/reporting/drill/appointments", {
       params: {
         type: params.type,
         status: params.status,
@@ -716,7 +723,7 @@ const funnelError =
     weekStartISO: string,
     weekEndISO: string
   ) {
-    const res = await api.get("/reporting/drill/won", {
+    const res = await reportingGet<DrillResponse>("/reporting/drill/won", {
       params: {
         from: weekStartISO.slice(0, 10),
         to: weekEndISO.slice(0, 10),
@@ -744,7 +751,7 @@ const funnelError =
   }
 
   async function openLeadsDrill() {
-    const res = await api.get("/reporting/drill/leads-received", {
+    const res = await reportingGet<DrillResponse>("/reporting/drill/leads-received", {
       params: { from: fromISO, to: toISO, limit: 2000 },
     });
     setDrillTitle("Leads reçus (créés sur la période)");
@@ -754,7 +761,7 @@ const funnelError =
   }
 
   async function openCohortSalesDrill() {
-    const res = await api.get("/reporting/drill/won", {
+    const res = await reportingGet<DrillResponse>("/reporting/drill/won", {
       params: { cohortFrom: fromISO, cohortTo: toISO, limit: 2000 },
     });
     setDrillTitle("Ventes (Cohorte) – détail");
@@ -773,7 +780,7 @@ const funnelError =
     params: Record<string, any>
   ) {
     try {
-      return await api.get(url, { params });
+      return await reportingGet<DrillResponse>(url, { params });
     } catch (e: any) {
       return {
         data: {
