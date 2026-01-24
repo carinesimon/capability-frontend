@@ -187,6 +187,18 @@ type MetricSeriesOut = {
   byDay?: Array<{ day: string; count: number }>;
 };
 
+type FilterOptionUser = {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+};
+
+type FilterOptions = {
+  sources: string[];
+  setters: FilterOptionUser[];
+  closers: FilterOptionUser[];
+};
+
 type SalesWeeklyItem = {
   weekStart: string;
   weekEnd: string;
@@ -1012,10 +1024,18 @@ export default function DashboardPage() {
     // Timezone sélectionné (affichage + agrégations serveur)
   const [tz, setTz] = useState<string>("Europe/Paris");
 
-  const [filtersOpen, setFiltersOpen] = useState(false);
+const [filtersOpen, setFiltersOpen] = useState(false);
   const [funnelOpen, setFunnelOpen] = useState(false);
   const [comparePrev, setComparePrev] =
     useState<boolean>(true);
+  const [sourcesInclude, setSourcesInclude] = useState<
+    string[]
+  >([]);
+  const [sourcesExclude, setSourcesExclude] = useState<
+    string[]
+  >([]);
+  const [setterIds, setSetterIds] = useState<string[]>([]);
+  const [closerIds, setCloserIds] = useState<string[]>([]);
 
   const fromISO = range.from ? toISODate(range.from) : undefined;
   const toISO = range.to ? toISODate(range.to) : undefined;
@@ -1026,6 +1046,37 @@ export default function DashboardPage() {
   const toDate = useMemo(
     () => asDate(range.to) ?? new Date(),
     [range.to]
+  );
+  const sourcesCsv = useMemo(
+    () =>
+      sourcesInclude.length > 0
+        ? sourcesInclude.join(",")
+        : undefined,
+    [sourcesInclude]
+  );
+  const sourcesExcludeCsv = useMemo(
+    () =>
+      sourcesExclude.length > 0
+        ? sourcesExclude.join(",")
+        : undefined,
+    [sourcesExclude]
+  );
+  const setterIdsCsv = useMemo(
+    () => (setterIds.length > 0 ? setterIds.join(",") : undefined),
+    [setterIds]
+  );
+  const closerIdsCsv = useMemo(
+    () => (closerIds.length > 0 ? closerIds.join(",") : undefined),
+    [closerIds]
+  );
+  const filterCsvParams = useMemo(
+    () => ({
+      sourcesCsv,
+      sourcesExcludeCsv,
+      setterIdsCsv,
+      closerIdsCsv,
+    }),
+    [sourcesCsv, sourcesExcludeCsv, setterIdsCsv, closerIdsCsv]
   );
 
   // ========= FUNNEL METRICS (pour les tuiles + Funnel) =========
@@ -1124,9 +1175,13 @@ const funnelData: FunnelProps["data"] = {
     label: string;
     count: number;
   };
-  const [rv0NsWeekly, setRv0NsWeekly] = useState<Rv0NsWeek[]>(
+const [rv0NsWeekly, setRv0NsWeekly] = useState<Rv0NsWeek[]>(
     []
   );
+  const [filterOptions, setFilterOptions] =
+    useState<FilterOptions | null>(null);
+  const [filterOptionsLoading, setFilterOptionsLoading] =
+    useState(false);
 
 
   // Drill modal
@@ -1176,6 +1231,20 @@ const positiveRateBadgeClass = (rate?: number | null) => {
 const neutralKpiCell =
   "py-2.5 px-3 text-right tabular-nums text-sm text-slate-100/90";
 
+  const toggleFilterValue = (
+    value: string,
+    current: string[],
+    setValue: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    setValue((prev) =>
+      prev.includes(value)
+        ? prev.filter((entry) => entry !== value)
+        : [...prev, value]
+    );
+  };
+  const formatFilterUser = (user: FilterOptionUser) =>
+    user.name?.trim() || user.email?.trim() || user.id;
+
 
   // Helper fetch "metric/*" safe
   async function fetchSafeMetric(
@@ -1216,10 +1285,53 @@ const neutralKpiCell =
       }
     }
     verify();
-    return () => {
+   return () => {
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (!authChecked || authError) return;
+    let cancelled = false;
+
+    async function loadFilterOptions() {
+      try {
+        setFilterOptionsLoading(true);
+        const res = await api.get<FilterOptions>(
+          "/reporting/filter-options",
+          {
+            params: { from: fromISO, to: toISO, tz },
+          }
+        );
+        if (cancelled) return;
+        const data = res.data || {
+          sources: [],
+          setters: [],
+          closers: [],
+        };
+        setFilterOptions({
+          sources: Array.isArray(data.sources) ? data.sources : [],
+          setters: Array.isArray(data.setters) ? data.setters : [],
+          closers: Array.isArray(data.closers) ? data.closers : [],
+        });
+      } catch {
+        if (!cancelled) {
+          setFilterOptions({
+            sources: [],
+            setters: [],
+            closers: [],
+          });
+        }
+      } finally {
+        if (!cancelled) setFilterOptionsLoading(false);
+      }
+    }
+
+    loadFilterOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [authChecked, authError, fromISO, toISO, tz]);
 
    // Data (courant)
   useEffect(() => {
@@ -1233,10 +1345,19 @@ const neutralKpiCell =
 
         // 1) Résumés & séries hebdo
         const [sumRes, leadsRes, weeklyRes, opsRes] = await Promise.all([
-          api.get<SummaryOut>("/reporting/summary", { params: { from: fromISO, to: toISO, tz, } }),
-          api.get<LeadsReceivedOut>("/metrics/leads-by-day", { params: { from: fromISO, to: toISO, tz, } }),
-          api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", { params: { from: fromISO, to: toISO, tz, } }),
-          api.get<{ ok: true; rows: WeeklyOpsRow[] }>("/reporting/weekly-ops", { params: { from: fromISO, to: toISO, tz, } }),
+          api.get<SummaryOut>("/reporting/summary", {
+            params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
+          }),
+          api.get<LeadsReceivedOut>("/metrics/leads-by-day", {
+            params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
+          }),
+          api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", {
+            params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
+          }),
+          api.get<{ ok: true; rows: WeeklyOpsRow[] }>(
+            "/reporting/weekly-ops",
+            { params: { from: fromISO, to: toISO, tz, ...filterCsvParams } }
+          ),
         ]);
 
         if (cancelled) return;
@@ -1249,19 +1370,27 @@ const neutralKpiCell =
         setOps(opsSorted);
 
         // 2) Séries journalières basées sur StageEvent (mêmes métriques que le funnel /metrics/funnel)
-        const [m1, m2, m3] = await Promise.all([
+         const [m1, m2, m3] = await Promise.all([
           fetchSafeMetric("/metrics/stage-series", {
-              from: fromISO, to: toISO, stage: "CALL_REQUESTED", tz,
+              from: fromISO,
+              to: toISO,
+              stage: "CALL_REQUESTED",
+              tz,
+              ...filterCsvParams,
             }),
           fetchSafeMetric("/metrics/stage-series", {
             from: fromISO,
             to: toISO,
-            stage: "CALL_ATTEMPT", tz,     // Appels passés
+            stage: "CALL_ATTEMPT",
+            tz,
+            ...filterCsvParams,     // Appels passés
           }),
           fetchSafeMetric("/metrics/stage-series", {
             from: fromISO,
             to: toISO,
-            stage: "CALL_ANSWERED", tz,    // Appels répondus
+            stage: "CALL_ANSWERED",
+            tz,
+            ...filterCsvParams,    // Appels répondus
           }),
         ]);
 
@@ -1273,7 +1402,12 @@ const neutralKpiCell =
 
         // 3) RV0 no-show par semaine, à partir de StageEvent(RV0_NO_SHOW) → /metrics/stage-series
         const rv0SeriesRes = await api.get<MetricSeriesOut>("/metrics/stage-series", {
-          params: { from: fromISO, to: toISO, stage: "RV0_NO_SHOW" },
+          params: {
+            from: fromISO,
+            to: toISO,
+            stage: "RV0_NO_SHOW",
+            ...filterCsvParams,
+          },
         });
         const series = rv0SeriesRes.data?.byDay || [];
 
@@ -1358,8 +1492,7 @@ useEffect(() => {
   let cancelled = false;
 
   async function loadSpotlight() {
-    const params = { from: fromISO, to: toISO, tz };
-
+    const params = { from: fromISO, to: toISO, tz, ...filterCsvParams };
     try {
       // 1) Tentative endpoints spotlight
       const [sRes, cRes] = await Promise.all([
@@ -1566,8 +1699,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [authChecked, authError, fromISO, toISO, tz]);
-
+}, [authChecked, authError, fromISO, toISO, tz, filterCsvParams]);
 
  // (NOUVEAU) Annulés par jour via historisation (StageEvent)
 /*
@@ -1661,7 +1793,9 @@ useEffect(() => {
       try {
         const res = await api.get<{ ok?: boolean; rows?: DuoRow[] }>(
           "/reporting/duos",
-          { params: { from: fromISO, to: toISO, tz, } }
+          {
+            params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
+          }
         );
         if (cancelled) return;
 
@@ -1687,8 +1821,7 @@ useEffect(() => {
 
     loadDuos();
     return () => { cancelled = true; };
-  }, [authChecked, authError, fromISO, toISO, tz]);
-
+  }, [authChecked, authError, fromISO, toISO, tz, filterCsvParams]);
   // Enrichissements (taux) — pas de hooks conditionnels
   const settersWithRates = useMemo(() => {
     return setters.map((s) => {
@@ -1912,10 +2045,11 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
 
       try {
         // on utilise ton helper robuste qui gère RV0_HONORED / RV0_HONOURED
-        const res = await fetchStageSeriesAny("RV0_HONORED", {
+         const res = await fetchStageSeriesAny("RV0_HONORED", {
           from: fromISO,
           to: toISO,
           tz,
+          ...filterCsvParams,
         });
         if (!cancelled) setRv0Daily(res);
       } catch {
@@ -1926,8 +2060,7 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
     return () => {
       cancelled = true;
     };
-  }, [fromISO, toISO, tz]);
-
+  }, [fromISO, toISO, tz, filterCsvParams]);
 
 useEffect(() => {
   let cancelled = false;
@@ -1940,13 +2073,12 @@ useEffect(() => {
       }
 
       // On récupère 4 séries : RV1 annulé / reporté, RV2 annulé / reporté
-      const [rv1C, rv1P, rv2C, rv2P] = await Promise.all([
-        fetchStageSeriesAny("RV1_CANCELED",  { from: fromISO, to: toISO, tz }),
-        fetchStageSeriesAny("RV1_POSTPONED", { from: fromISO, to: toISO, tz }),
-        fetchStageSeriesAny("RV2_CANCELED",  { from: fromISO, to: toISO, tz }),
-        fetchStageSeriesAny("RV2_POSTPONED", { from: fromISO, to: toISO, tz }),
+     const [rv1C, rv1P, rv2C, rv2P] = await Promise.all([
+        fetchStageSeriesAny("RV1_CANCELED",  { from: fromISO, to: toISO, tz, ...filterCsvParams }),
+        fetchStageSeriesAny("RV1_POSTPONED", { from: fromISO, to: toISO, tz, ...filterCsvParams }),
+        fetchStageSeriesAny("RV2_CANCELED",  { from: fromISO, to: toISO, tz, ...filterCsvParams }),
+        fetchStageSeriesAny("RV2_POSTPONED", { from: fromISO, to: toISO, tz, ...filterCsvParams }),
       ]);
-
       const map = new Map<string, { rv1: number; rv2: number }>();
 
       const add = (src: MetricSeriesOut | null | undefined, key: "rv1" | "rv2") => {
@@ -2002,8 +2134,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [fromISO, toISO, tz]);
-
+}, [fromISO, toISO, tz, filterCsvParams]);
   // ======= DRILLS : helpers endpoints =======
   async function openAppointmentsDrill(params: {
     title: string;
@@ -2025,7 +2156,9 @@ useEffect(() => {
           status: params.status,
           from: params.from ?? fromISO,
           to: params.to ?? toISO,
-          limit: 2000, tz,
+          limit: 2000,
+          tz,
+          ...filterCsvParams,
         },
       }
     );
@@ -2054,7 +2187,7 @@ useEffect(() => {
   async function openCallRequestsDrill() {
     const res: any = await fetchSafe(
       "/reporting/drill/call-requests",
-      { from: fromISO, to: toISO, limit: 2000, tz, }
+      { from: fromISO, to: toISO, limit: 2000, tz, ...filterCsvParams }
     );
     setDrillTitle("Demandes d’appel – détail");
     const items: DrillItem[] = res?.data?.items || [];
@@ -2068,8 +2201,8 @@ useEffect(() => {
   }
   async function openCallsDrill() {
     const res: any = await fetchSafe(
-      "/reporting/drill/calls",
-      { from: fromISO, to: toISO, limit: 2000, tz, }
+      "/reporting/drill/calls",␊
+      { from: fromISO, to: toISO, limit: 2000, tz, ...filterCsvParams }
     );
     setDrillTitle("Appels passés – détail");
     const items: DrillItem[] = res?.data?.items || [];
@@ -2088,7 +2221,9 @@ useEffect(() => {
         from: fromISO,
         to: toISO,
         answered: 1,
-        limit: 2000, tz,
+        limit: 2000,
+        tz,
+        ...filterCsvParams,
       }
     );
     setDrillTitle("Appels répondus – détail");
@@ -2108,7 +2243,9 @@ useEffect(() => {
         from: fromISO,
         to: toISO,
         setterNoShow: 1,
-        limit: 2000, tz,
+        limit: 2000,
+        tz,
+        ...filterCsvParams,
       }
     );
     setDrillTitle("No-show Setter – détail");
@@ -2197,12 +2334,13 @@ function KpiBox({
   const onFunnelCardClick = async (key: FunnelKey): Promise<void> => {
   switch (key) {
     case "leads": {
-      const res = await api.get("/reporting/drill/leads-received", {
+     const res = await api.get("/reporting/drill/leads-received", {
         params: {
           from: fromISO,
           to: toISO,
           limit: 2000,
           tz,
+          ...filterCsvParams,
         },
       });
       setDrillTitle("Leads reçus – détail");
@@ -2278,6 +2416,7 @@ function KpiBox({
           to: toISO,
           limit: 2000,
           tz,
+          ...filterCsvParams,
         },
       });
       setDrillTitle("Ventes (WON) – détail");
@@ -4438,7 +4577,7 @@ function KpiBox({
                   className="btn btn-primary"
                   onClick={async () => {
                     const res = await api.get(`/reporting/export/spotlight-setters.pdf`, {
-                      params: { from: fromISO, to: toISO, tz },
+                      params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
                       responseType: 'blob',
                     });
                     const url = URL.createObjectURL(res.data);
@@ -4456,8 +4595,8 @@ function KpiBox({
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-setters.csv`, {
-                      params: { from: fromISO, to: toISO, tz },
+                   const res = await api.get(`/reporting/export/spotlight-setters.csv`, {
+                      params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
                       responseType: 'blob',
                     });
                     const url = URL.createObjectURL(res.data);
@@ -4478,7 +4617,7 @@ function KpiBox({
                   className="btn btn-primary"
                   onClick={async () => {
                     const res = await api.get(`/reporting/export/spotlight-closers.pdf`, {
-                      params: { from: fromISO, to: toISO, tz },
+                      params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
                       responseType: 'blob',
                     });
                     const url = URL.createObjectURL(res.data);
@@ -4496,9 +4635,9 @@ function KpiBox({
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-closers.csv`, {
-                      params: { from: fromISO, to: toISO, tz },
-                      responseType: 'blob',
+                   const res = await api.get(`/reporting/export/spotlight-closers.csv`, {␊
+                      params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
+                      responseType: 'blob',␊
                     });
                     const url = URL.createObjectURL(res.data);
                     const a = document.createElement('a');
@@ -4647,7 +4786,7 @@ function KpiBox({
 
                 </div>
 
-                <div>
+                <div>␊
                   <div className="label">
                     Période personnalisée
                   </div>
@@ -4660,6 +4799,150 @@ function KpiBox({
                       })
                     }
                   />
+                </div>
+
+                <div>
+                  <div className="label">
+                    Sources (inclure)
+                  </div>
+                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
+                    {filterOptionsLoading ? (
+                      <div className="text-xs text-[--muted]">
+                        Chargement…
+                      </div>
+                    ) : (filterOptions?.sources?.length ?? 0) > 0 ? (
+                      filterOptions?.sources.map((source) => (
+                        <label
+                          key={`src-inc-${source}`}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={sourcesInclude.includes(source)}
+                            onChange={() =>
+                              toggleFilterValue(
+                                source,
+                                sourcesInclude,
+                                setSourcesInclude
+                              )
+                            }
+                          />
+                          <span>{source}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <div className="text-xs text-[--muted]">
+                        Aucune source.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="label">
+                    Sources (exclure)
+                  </div>
+                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
+                    {filterOptionsLoading ? (
+                      <div className="text-xs text-[--muted]">
+                        Chargement…
+                      </div>
+                    ) : (filterOptions?.sources?.length ?? 0) > 0 ? (
+                      filterOptions?.sources.map((source) => (
+                        <label
+                          key={`src-exc-${source}`}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={sourcesExclude.includes(source)}
+                            onChange={() =>
+                              toggleFilterValue(
+                                source,
+                                sourcesExclude,
+                                setSourcesExclude
+                              )
+                            }
+                          />
+                          <span>{source}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <div className="text-xs text-[--muted]">
+                        Aucune source.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="label">Setters</div>
+                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
+                    {filterOptionsLoading ? (
+                      <div className="text-xs text-[--muted]">
+                        Chargement…
+                      </div>
+                    ) : (filterOptions?.setters?.length ?? 0) > 0 ? (
+                      filterOptions?.setters.map((setter) => (
+                        <label
+                          key={`setter-${setter.id}`}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={setterIds.includes(setter.id)}
+                            onChange={() =>
+                              toggleFilterValue(
+                                setter.id,
+                                setterIds,
+                                setSetterIds
+                              )
+                            }
+                          />
+                          <span>{formatFilterUser(setter)}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <div className="text-xs text-[--muted]">
+                        Aucun setter.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="label">Closers</div>
+                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
+                    {filterOptionsLoading ? (
+                      <div className="text-xs text-[--muted]">
+                        Chargement…
+                      </div>
+                    ) : (filterOptions?.closers?.length ?? 0) > 0 ? (
+                      filterOptions?.closers.map((closer) => (
+                        <label
+                          key={`closer-${closer.id}`}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={closerIds.includes(closer.id)}
+                            onChange={() =>
+                              toggleFilterValue(
+                                closer.id,
+                                closerIds,
+                                setCloserIds
+                              )
+                            }
+                          />
+                          <span>{formatFilterUser(closer)}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <div className="text-xs text-[--muted]">
+                        Aucun closer.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -4717,5 +5000,6 @@ function KpiBox({
     </div>
   );
 }
+
 
 
