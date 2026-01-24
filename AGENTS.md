@@ -81,3 +81,11 @@ A task is done when:
 - Required checks pass (or failures are explicitly identified as pre-existing),
 - The diff is minimal and reviewable,
 - No secrets were added or leaked.
+- 
+## Manual-apply mode (when requested)
+If the user asks for a manual application:
+- Do NOT implement changes directly.
+- Output an "Apply Plan" with exact file paths, exact code blocks to paste, and the exact line/section to replace.
+- Provide a checklist to verify (commands + expected output).
+- If multiple changes, number them and keep each change minimal.
+
