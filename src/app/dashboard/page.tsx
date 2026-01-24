@@ -2201,7 +2201,7 @@ useEffect(() => {
   }
   async function openCallsDrill() {
     const res: any = await fetchSafe(
-      "/reporting/drill/calls",␊
+      "/reporting/drill/calls",
       { from: fromISO, to: toISO, limit: 2000, tz, ...filterCsvParams }
     );
     setDrillTitle("Appels passés – détail");
@@ -4635,9 +4635,9 @@ function KpiBox({
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                   const res = await api.get(`/reporting/export/spotlight-closers.csv`, {␊
+                   const res = await api.get(`/reporting/export/spotlight-closers.csv`, {
                       params: { from: fromISO, to: toISO, tz, ...filterCsvParams },
-                      responseType: 'blob',␊
+                      responseType: 'blob',
                     });
                     const url = URL.createObjectURL(res.data);
                     const a = document.createElement('a');
@@ -5000,6 +5000,3 @@ function KpiBox({
     </div>
   );
 }
-
-
-
