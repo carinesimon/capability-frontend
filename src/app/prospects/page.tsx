@@ -3,6 +3,7 @@ import { reportingApi } from "@/lib/reporting";
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import api from "@/lib/api";
+import { reportingGet } from "@/lib/reportingApi";
 import Sidebar from "@/components/Sidebar";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 import { currentMonthRange } from "@/lib/date";
@@ -147,6 +148,9 @@ type DrillItem = {
   stage?: string | null;
   createdAt?: string;
   stageUpdatedAt?: string;
+};
+type DrillResponse = {
+  items?: DrillItem[];
 };
 function DrillModal({
   title, open, onClose, rows,
@@ -853,7 +857,7 @@ const [drillTitle, setDrillTitle] = useState("");
 const [drillRows, setDrillRows] = useState<DrillItem[]>([]);
 
 async function openDrillLeadsReceived() {
-  const res = await api.get("/reporting/drill/leads-received", {
+  const res = await reportingGet<DrillResponse>("/reporting/drill/leads-received", {
     params: { from: fromISO, to: toISO, limit: 2000 },
   });
   const items: DrillItem[] = (res.data?.items || []).map((it: any) => ({
@@ -875,7 +879,7 @@ async function openDrillLeadsReceived() {
 }
 
 async function openDrillWon() {
-  const res = await api.get("/reporting/drill/won", {
+  const res = await reportingGet<DrillResponse>("/reporting/drill/won", {
     params: { from: fromISO, to: toISO, limit: 2000 },
   });
   const items: DrillItem[] = (res.data?.items || []).map((it: any) => ({

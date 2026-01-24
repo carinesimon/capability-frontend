@@ -1,6 +1,7 @@
 // src/hooks/useFunnelMetrics.ts
-import { useEffect, useState } from "react";
-import api from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { reportingGet } from "@/lib/reportingApi";
+import { useReportingFilters } from "@/lib/reportingFilters";
 
 export type FunnelTotals = {
   LEADS_RECEIVED: number;
@@ -51,6 +52,18 @@ export function useFunnelMetrics(
   const [data, setData] = useState<FunnelTotals | {}>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const { sourcesInclude, sourcesExclude, setterIds, closerIds } =
+    useReportingFilters();
+  const filterKey = useMemo(
+    () =>
+      [
+        sourcesInclude.join(","),
+        sourcesExclude.join(","),
+        setterIds.join(","),
+        closerIds.join(","),
+      ].join("|"),
+    [sourcesInclude, sourcesExclude, setterIds, closerIds]
+  );
 
   useEffect(() => {
     if (!fromDate || !toDate) return;
@@ -64,7 +77,7 @@ export function useFunnelMetrics(
         setLoading(true);
         setError(null);
 
-        const res = await api.get<FunnelTotals>("/metrics/funnel", {
+        const res = await reportingGet<FunnelTotals>("/metrics/funnel", {
           params: { from, to, tz }, // ✅ on envoie le tz au backend
         });
 
@@ -80,7 +93,7 @@ export function useFunnelMetrics(
     }
 
     load();
-  }, [fromDate?.getTime(), toDate?.getTime(), tz]); // ✅ tz dans les deps
+  }, [fromDate?.getTime(), toDate?.getTime(), tz, filterKey]); // ✅ tz dans les deps
 
   return { data, loading, error };
 }
