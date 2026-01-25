@@ -5,7 +5,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 type Row = { name: string; leads: number };
 
 export default function SettersLeadsBar({ data }: { data: Row[] }) {
-  // Evite les surprises d'hydratation liées à Recharts/mesures
+  // Evite les surprises d'hydratation liées à Recharts/mesures.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
