@@ -3,6 +3,7 @@ import api from "@/lib/api";
 
 /** ---- Types alignés au backend ---- */
 export type LeadsReceivedOut = {
+
   total: number;
   byDay?: Array<{ day: string; count: number }>;
 };
@@ -33,6 +34,25 @@ export type SummaryOut = {
 export type MetricSeriesOut = {
   total: number;
   byDay?: Array<{ day: string; count: number }>;
+};
+
+export type CohortStatusRequest = {
+  cohortFrom: string;
+  cohortTo: string;
+  asOf: string;
+  tz?: string;
+  sourcesCsv?: string;
+  sourcesExcludeCsv?: string;
+  setterIdsCsv?: string;
+  closerIdsCsv?: string;
+};
+
+export type CohortStatusResponse = {
+  total: number;
+  withStage: number;
+  unreached: number;
+  stages?: Array<{ stage: string; count: number }>;
+  byStage?: Array<{ stage: string; count: number }>;
 };
 
 export type SpotlightSetterRow = {
@@ -165,4 +185,8 @@ export const reportingApi = {
       byDay: data as Array<{ day: string; RV0_CANCELED: number; RV1_CANCELED: number; RV2_CANCELED: number; total: number }>,
     };
   },
+  cohortStatus: (payload: CohortStatusRequest) =>
+    api
+      .post<CohortStatusResponse>("/reporting/cohort-status", payload)
+      .then((r) => r.data),
 };
