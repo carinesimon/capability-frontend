@@ -61,7 +61,7 @@ export default function SettersLeadsBar({ data }: { data: Row[] }) {
             />
             <Tooltip
               cursor={{ fill: "rgba(255,255,255,.06)" }}
-              formatter={(v?: number) => [nf.format(v ?? 0), "Leads"] as [string, string]}]}
+              formatter={(v?: number) => [nf.format(v ?? 0), "Leads"] as [string, string]}
               contentStyle={{
                 background: "rgba(20,26,36,.95)",
                 border: "1px solid rgba(255,255,255,.08)",
