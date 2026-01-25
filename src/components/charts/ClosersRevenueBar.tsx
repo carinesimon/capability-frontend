@@ -65,7 +65,7 @@ export default function ClosersRevenueBar({ data }: { data: Row[] }) {
             />
             <Tooltip
               cursor={{ fill: "rgba(255,255,255,.06)" }}
-              formatter={(v: number) => [cf.format(v), "CA"] as [string, string]}
+              formatter={(v: number | undefined) => [cf.format(v ?? 0), "CA"]}
               contentStyle={{
                 background: "rgba(20,26,36,.95)",
                 border: "1px solid rgba(255,255,255,.08)",
