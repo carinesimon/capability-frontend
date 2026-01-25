@@ -4786,7 +4786,7 @@ function KpiBox({
 
                 </div>
 
-                <div>␊
+                <div>
                   <div className="label">
                     Période personnalisée
                   </div>
