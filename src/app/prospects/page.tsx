@@ -590,7 +590,6 @@ export default function ProspectsPage() {
   return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [fromISO, toISO]);
-
   /* ================== (FIX) traçage d’incrément sans bruit console ================== */
     const stageEventsSupportedRef = useRef<boolean>(true);
 
