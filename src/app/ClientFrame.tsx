@@ -12,7 +12,7 @@ import GlobalFiltersProvider from "@/components/GlobalFiltersProvider";
  */
 export default function ClientFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isLogin = pathname === "/login"; // ajuste si tu as d’autres routes d’auth
+  const isLogin = pathname === "/login"; // ajuste si tu as d’autres routes d’auth.
 
   return (
     <GlobalFiltersProvider>
