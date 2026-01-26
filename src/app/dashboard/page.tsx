@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import axios from "axios";
+import { useEffect, useMemo, useState } from "react";import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import { currentMonthRange } from "@/lib/date";
 import Sidebar from "@/components/Sidebar";
@@ -199,6 +199,8 @@ type FilterOptions = {
   setters: FilterOptionUser[];
   closers: FilterOptionUser[];
 };
+
+type SourceOptionPayload = string | { source?: string };
 
 type SalesWeeklyItem = {
   weekStart: string;
@@ -1226,6 +1228,19 @@ const neutralKpiCell =
   const formatFilterUser = (user: FilterOptionUser) =>
     user.name?.trim() || user.email?.trim() || user.id;
 
+  const normalizeSourceOptions = (
+    payload: SourceOptionPayload[] | { sources?: SourceOptionPayload[] } | null | undefined
+  ) => {
+    const list = Array.isArray(payload) ? payload : payload?.sources ?? [];
+    const sources = list
+      .map((entry) => {
+        if (typeof entry === "string") return entry.trim();
+        if (entry && typeof entry === "object") return entry.source?.trim() || "";
+        return "";
+      })
+      .filter(Boolean);
+    return Array.from(new Set(sources));
+  };
 
   // Helper fetch "metric/*" safe
   async function fetchSafeMetric(
@@ -1291,18 +1306,51 @@ const neutralKpiCell =
           closers: [],
         };
         setFilterOptions({
-          sources: Array.isArray(data.sources) ? data.sources : [],
+          sources: Array.isArray(data.sources)
+            ? normalizeSourceOptions(data.sources)
+            : [],
           setters: Array.isArray(data.setters) ? data.setters : [],
           closers: Array.isArray(data.closers) ? data.closers : [],
         });
-      } catch {
-        if (!cancelled) {
-          setFilterOptions({
-            sources: [],
-            setters: [],
-            closers: [],
-          });
+      } catch (error) {
+        if (cancelled) return;
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          try {
+            const sourcesRes = await api.get<
+              SourceOptionPayload[] | { sources?: SourceOptionPayload[] }
+            >(
+              "/reporting/sources",
+              {
+                params: {
+                  withCounts: true,
+                  withLastSeen: true,
+                  includeUnknown: true,
+                },
+              }
+            );
+            if (cancelled) return;
+            setFilterOptions({
+              sources: normalizeSourceOptions(sourcesRes.data),
+              setters: [],
+              closers: [],
+            });
+            return;
+          } catch {
+            if (!cancelled) {
+              setFilterOptions({
+                sources: [],
+                setters: [],
+                closers: [],
+              });
+            }
+            return;
+          }
         }
+        setFilterOptions({
+          sources: [],
+          setters: [],
+          closers: [],
+        });
       } finally {
         if (!cancelled) setFilterOptionsLoading(false);
       }
