@@ -4,7 +4,24 @@ import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 
-type SourcesResponse = string[] | { sources?: string[] };
+type SourceOptionMeta = {
+  count?: number;
+  lastSeenAt?: string;
+};
+
+type SourceOption = {
+  value: string;
+  label: string;
+  meta?: SourceOptionMeta;
+};
+
+type SourcePayload =
+  | string
+  | { source?: string; count?: number; lastSeenAt?: string };
+
+type SourcesResponse =
+  | SourcePayload[]
+  | { sources?: SourcePayload[] };
 
 type Mode = "include" | "exclude";
 
@@ -21,9 +38,38 @@ export default function SourcesFilter({
   } = useGlobalFilters();
   const [mode, setMode] = useState<Mode>("include");
   const [query, setQuery] = useState("");
-  const [options, setOptions] = useState<string[]>([]);
+  const [options, setOptions] = useState<SourceOption[]>([]);
   const [loading, setLoading] = useState(false);
-
+  
+  const normalizeOptions = (payload: SourcesResponse): SourceOption[] => {
+    const list = Array.isArray(payload) ? payload : payload?.sources ?? [];
+    const mapped = list
+      .map((entry): SourceOption | null => {
+        if (typeof entry === "string") {
+          return { value: entry, label: entry };
+        }
+        if (entry && typeof entry === "object") {
+          const source = entry.source?.trim();
+          if (!source) return null;
+          return {
+            value: source,
+            label: source,
+            meta: {
+              count: entry.count,
+              lastSeenAt: entry.lastSeenAt,
+            },
+          };
+        }
+        return null;
+      })
+      .filter((entry): entry is SourceOption => entry !== null);
+    const seen = new Set<string>();
+    return mapped.filter((entry) => {
+      if (seen.has(entry.value)) return false;
+      seen.add(entry.value);
+      return true;
+    });
+  };
   useEffect(() => {
     let cancelled = false;
     async function loadSources() {
@@ -31,9 +77,7 @@ export default function SourcesFilter({
         setLoading(true);
         const res = await api.get<SourcesResponse>("/reporting/sources");
         if (cancelled) return;
-        const data = res.data;
-        const list = Array.isArray(data) ? data : data?.sources ?? [];
-        setOptions(list.filter(Boolean));
+        setOptions(normalizeOptions(res.data));
       } catch {
         if (!cancelled) setOptions([]);
       } finally {
@@ -53,8 +97,8 @@ export default function SourcesFilter({
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return options;
-    return options.filter((source) =>
-      source.toLowerCase().includes(needle)
+    return options.filter((option) =>
+      option.label.toLowerCase().includes(needle)
     );
   }, [options, query]);
 
@@ -121,17 +165,17 @@ export default function SourcesFilter({
         {loading ? (
           <div className="text-xs text-[--muted]">Chargement…</div>
         ) : filtered.length > 0 ? (
-          filtered.map((source) => (
+          filtered.map((option) => (
             <label
-              key={`${mode}-${source}`}
+              key={`${mode}-${option.value}`}
               className="flex items-center gap-2 text-xs"
             >
               <input
                 type="checkbox"
-                checked={active.includes(source)}
-                onChange={() => toggleSource(source)}
+                checked={active.includes(option.value)}
+                onChange={() => toggleSource(option.value)}
               />
-              <span>{source}</span>
+              <span>{option.label}</span>
             </label>
           ))
         ) : (
