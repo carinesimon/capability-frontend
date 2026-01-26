@@ -1,6 +1,6 @@
 // frontend/src/lib/api.ts
 import axios from "axios";
-import type { AxiosRequestHeaders } from "axios";
+import type { AxiosRequestHeaders } from "axios";import type { AxiosRequestHeaders } from "axios";
 import { getAccessToken, clearAccessToken } from "./auth";
 import { getGlobalSourcesFilters } from "./globalSourcesFilters";
 
@@ -10,6 +10,7 @@ import { getGlobalSourcesFilters } from "./globalSourcesFilters";
  */
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "";
 let hasWarnedMissingBaseUrl = false;
+let hasLoggedMergedParams = false;
 
 /**
  * Détection optionnelle du tenant
@@ -81,22 +82,28 @@ api.interceptors.request.use((config) => {
     const { sourcesCsv, sourcesExcludeCsv } = getGlobalSourcesFilters();
     if (sourcesCsv || sourcesExcludeCsv) {
       if (config.params instanceof URLSearchParams) {
-        if (sourcesCsv && !config.params.has("sourcesCsv")) {
+        if (sourcesCsv) {
           config.params.set("sourcesCsv", sourcesCsv);
         }
-        if (sourcesExcludeCsv && !config.params.has("sourcesExcludeCsv")) {
+        if (sourcesExcludeCsv) {
           config.params.set("sourcesExcludeCsv", sourcesExcludeCsv);
         }
       } else {
-        const params = { ...(config.params || {}) } as Record<string, unknown>;
-        if (sourcesCsv && params.sourcesCsv === undefined) {
-          params.sourcesCsv = sourcesCsv;
-        }
-        if (sourcesExcludeCsv && params.sourcesExcludeCsv === undefined) {
-          params.sourcesExcludeCsv = sourcesExcludeCsv;
-        }
-        config.params = params;
+        config.params = {
+          ...(config.params ?? {}),
+          ...(sourcesCsv ? { sourcesCsv } : {}),
+          ...(sourcesExcludeCsv ? { sourcesExcludeCsv } : {}),
+        };
       }
+    }
+    if (!hasLoggedMergedParams && process.env.NODE_ENV !== "production") {
+      hasLoggedMergedParams = true;
+      const baseUrl = config.baseURL ?? "";
+      const urlValue = config.url ?? "";
+      console.info("[API] request params", {
+        url: `${baseUrl}${urlValue}`,
+        params: config.params,
+      });
     }
   }
   return config;
@@ -145,4 +152,5 @@ export async function moveLeadToBoardColumn(leadId: string, columnKey: string) {
   await api.post(apiPath(`/leads/${leadId}/board`), { columnKey });
 }
 export default api;
+
 
