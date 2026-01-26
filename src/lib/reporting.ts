@@ -86,23 +86,18 @@ export type SpotlightCloserRow = {
 };
 
 export async function getSpotlightSetters(from?: string, to?: string): Promise<SpotlightSetterRow[]> {
-  const q = new URLSearchParams();
-  if (from) q.set('from', from);
-  if (to) q.set('to', to);
-  const res = await fetch(`/reporting/spotlight-setters?${q.toString()}`);
-  if (!res.ok) throw new Error('Failed to fetch spotlight setters');
-  return res.json();
+  const res = await api.get<SpotlightSetterRow[]>("/reporting/spotlight-setters", {
+    params: { from, to },
+  });
+  return res.data;
 }
 
 export async function getSpotlightClosers(from?: string, to?: string): Promise<SpotlightCloserRow[]> {
-  const q = new URLSearchParams();
-  if (from) q.set('from', from);
-  if (to) q.set('to', to);
-  const res = await fetch(`/reporting/spotlight-closers?${q.toString()}`);
-  if (!res.ok) throw new Error('Failed to fetch spotlight closers');
-  return res.json();
+  const res = await api.get<SpotlightCloserRow[]>("/reporting/spotlight-closers", {
+    params: { from, to },
+  });
+  return res.data;
 }
-
 
 /** Un util simple pour fusionner des séries par jour */
 function mergeByDay(keys: string[], seriesMap: Record<string, Array<{ day: string; count: number }>>): Array<any> {
