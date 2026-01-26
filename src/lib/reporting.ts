@@ -121,8 +121,12 @@ function mergeByDay(keys: string[], seriesMap: Record<string, Array<{ day: strin
   });
 }
 
-export const reportingApi = {
-  /** Tous ces endpoints acceptent maintenant le fuseau IANA (tz) */
+export type ReportingFilterParams = {
+  sourcesCsv?: string;
+  sourcesExcludeCsv?: string;
+};
+
+export const reportingApi = {  /** Tous ces endpoints acceptent maintenant le fuseau IANA (tz) */
   leadsReceived: (from?: string, to?: string, tz?: string) =>
     api.get<LeadsReceivedOut>("/reporting/leads-received", { params: { from, to, tz } }).then(r => r.data),
 
@@ -151,9 +155,17 @@ export const reportingApi = {
    * Séries d’un stage donné, agrégées par jour dans le fuseau tz (backend: /metrics/stage-series).
    * Exemples de stage : "RV0_CANCELED", "RV1_CANCELED", "RV2_CANCELED", "CALL_REQUESTED", ...
    */
-  stageSeries: (stage: string, from?: string, to?: string, tz?: string) =>
+ stageSeries: (
+    stage: string,
+    from?: string,
+    to?: string,
+    tz?: string,
+    filters?: ReportingFilterParams
+  ) =>
     api
-      .get<MetricSeriesOut>("/metrics/stage-series", { params: { stage, from, to, tz } })
+      .get<MetricSeriesOut>("/metrics/stage-series", {
+        params: { stage, from, to, tz, ...filters },
+      })
       .then(r => r.data),
 
   /**
@@ -161,11 +173,22 @@ export const reportingApi = {
    * [{ day, RV0_CANCELED, RV1_CANCELED, RV2_CANCELED, total }]
    * déjà fusionné, prêt pour Recharts.
    */
-  canceledDaily: async (from?: string, to?: string, tz?: string) => {
+  canceledDaily: async (
+    from?: string,
+    to?: string,
+    tz?: string,
+    filters?: ReportingFilterParams
+  ) => {
     const [rv0, rv1, rv2] = await Promise.all([
-      api.get<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV0_CANCELED", from, to, tz } }),
-      api.get<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV1_CANCELED", from, to, tz } }),
-      api.get<MetricSeriesOut>("/metrics/stage-series", { params: { stage: "RV2_CANCELED", from, to, tz } }),
+      api.get<MetricSeriesOut>("/metrics/stage-series", {
+        params: { stage: "RV0_CANCELED", from, to, tz, ...filters },
+      }),
+      api.get<MetricSeriesOut>("/metrics/stage-series", {
+        params: { stage: "RV1_CANCELED", from, to, tz, ...filters },
+      }),
+      api.get<MetricSeriesOut>("/metrics/stage-series", {
+        params: { stage: "RV2_CANCELED", from, to, tz, ...filters },
+      }),
     ]);
 
     const data = mergeByDay(
@@ -190,3 +213,4 @@ export const reportingApi = {
       .post<CohortStatusResponse>("/reporting/cohort-status", payload)
       .then((r) => r.data),
 };
+
