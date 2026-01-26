@@ -2,24 +2,32 @@
 
 import { useState } from "react";
 import api from "@/lib/api";
-
+import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 type Props = {
   from?: string;
   to?: string;
   
 };
 
-function buildParams(from?: string, to?: string) {
+function buildParams(
+  from?: string,
+  to?: string,
+  sourcesCsv?: string,
+  sourcesExcludeCsv?: string
+) 
+{  
   const p = new URLSearchParams();
   if (from) p.set("from", from);
   if (to) p.set("to", to);
+  if (sourcesCsv) p.set("sourcesCsv", sourcesCsv);
+  if (sourcesExcludeCsv) p.set("sourcesExcludeCsv", sourcesExcludeCsv);
   return p.toString();
 }
 
 export default function GlobalExports({ from, to }: Props) {
   const [loading, setLoading] = useState<string | null>(null);
-  const qs = buildParams(from, to);
-
+  const { sourcesCsv, sourcesExcludeCsv } = useGlobalFilters();
+  const qs = buildParams(from, to, sourcesCsv, sourcesExcludeCsv);
   return (
     <div className="card">
       <div className="flex items-start justify-between gap-4">
