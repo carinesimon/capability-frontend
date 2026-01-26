@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { motion } from "framer-motion";
-
+import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 type Budget = {
   id: string;
   period: "WEEKLY" | "MONTHLY";
@@ -39,12 +39,16 @@ function mondayISO(d = new Date()) {
 }
 
 export default function BudgetPanel() {
+  const { sourcesCsv, sourcesExcludeCsv } = useGlobalFilters();
   const [weekStartISO, setWeekStartISO] = useState<string>(mondayISO());
   const [amount, setAmount] = useState<string>("0");
   const [list, setList] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-
+  const filterCsvParams = useMemo(
+    () => ({ sourcesCsv, sourcesExcludeCsv }),
+    [sourcesCsv, sourcesExcludeCsv]
+  );
   // on affiche aussi un résumé global sur la période couverte par la liste (si pratique)
   const minWeek = useMemo(() => {
     const xs = list.map(b => b.weekStart).filter(Boolean) as string[];
@@ -79,7 +83,7 @@ export default function BudgetPanel() {
       if (!minWeek || !maxWeek) { setSummary(null); return; }
       try {
         const sRes = await api.get<SummaryOut>("/reporting/summary", {
-          params: { from: minWeek, to: maxWeek },
+          params: { from: minWeek, to: maxWeek, ...filterCsvParams },
         });
         setSummary(sRes.data || null);
       } catch {
@@ -87,8 +91,7 @@ export default function BudgetPanel() {
       }
     }
     loadSummary();
-  }, [minWeek, maxWeek, list]);
-
+  }, [minWeek, maxWeek, list, filterCsvParams]);
 
   async function onSave() {
     setMsg(null);
