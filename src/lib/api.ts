@@ -1,17 +1,15 @@
 // frontend/src/lib/api.ts
 import axios from "axios";
+import type { AxiosRequestHeaders } from "axios";
 import { getAccessToken, clearAccessToken } from "./auth";
 import { getGlobalSourcesFilters } from "./globalSourcesFilters";
 
 /**
  * Base URL de l'API (sans slash final)
- * Compat : accepte NEXT_PUBLIC_API_URL ou NEXT_PUBLIC_API_BASE_URL
+ * Requis : NEXT_PUBLIC_API_URL
  */
-const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "http://localhost:4000").replace(/\/$/, "");
-
-console.log("[API] baseURL =", BASE_URL);
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "";
+let hasWarnedMissingBaseUrl = false;
 
 /**
  * Détection optionnelle du tenant
@@ -49,17 +47,31 @@ export function apiPath(path: string): string {
 
 /** Instance Axios */
 const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: BASE_URL || undefined,
   withCredentials: false, // passe à true si tu utilises des cookies httpOnly
   timeout: 15000,
 });
 
 /** Intercepteur requête : Bearer */
 api.interceptors.request.use((config) => {
+  if (!BASE_URL) {
+    const isAuthCall = /\/auth(\/|$)/.test(config.url || "");
+    if (!hasWarnedMissingBaseUrl && process.env.NODE_ENV !== "production") {
+      hasWarnedMissingBaseUrl = true;
+      console.warn(
+        "[API] NEXT_PUBLIC_API_URL is not set; non-auth calls will be blocked to avoid localhost requests."
+      );
+    }
+    if (!isAuthCall) {
+      throw new Error(
+        "NEXT_PUBLIC_API_URL is required for API requests. Set it to avoid localhost calls."
+      );
+    }
+  }
   const token = getAccessToken();
   if (token) {
     config.headers = config.headers || {};
-    (config.headers as any).Authorization = `Bearer ${token}`;
+    (config.headers as AxiosRequestHeaders).Authorization = `Bearer ${token}`;
   }
   const url = config.url || "";
   const path = url.startsWith("http")
@@ -96,7 +108,6 @@ api.interceptors.response.use(
   (err) => {
     const status = err?.response?.status;
     const url = (err?.config?.baseURL || "") + (err?.config?.url || "");
-    // eslint-disable-next-line no-console
     console.error("[API ERROR]", status, url, err?.response?.data || err?.message);
 
     const isAuthLoginCall = /\/auth\/login$/.test(err?.config?.url || "");
@@ -134,3 +145,4 @@ export async function moveLeadToBoardColumn(leadId: string, columnKey: string) {
   await api.post(apiPath(`/leads/${leadId}/board`), { columnKey });
 }
 export default api;
+
