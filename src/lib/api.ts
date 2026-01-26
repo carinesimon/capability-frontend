@@ -1,6 +1,7 @@
 // frontend/src/lib/api.ts
 import axios from "axios";
 import { getAccessToken, clearAccessToken } from "./auth";
+import { getGlobalSourcesFilters } from "./globalSourcesFilters";
 
 /**
  * Base URL de l'API (sans slash final)
@@ -60,6 +61,32 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     (config.headers as any).Authorization = `Bearer ${token}`;
   }
+  const url = config.url || "";
+  const path = url.startsWith("http")
+    ? new URL(url).pathname
+    : url;
+  if (/\/(reporting|metrics)(\/|$)/.test(path)) {
+    const { sourcesCsv, sourcesExcludeCsv } = getGlobalSourcesFilters();
+    if (sourcesCsv || sourcesExcludeCsv) {
+      if (config.params instanceof URLSearchParams) {
+        if (sourcesCsv && !config.params.has("sourcesCsv")) {
+          config.params.set("sourcesCsv", sourcesCsv);
+        }
+        if (sourcesExcludeCsv && !config.params.has("sourcesExcludeCsv")) {
+          config.params.set("sourcesExcludeCsv", sourcesExcludeCsv);
+        }
+      } else {
+        const params = { ...(config.params || {}) } as Record<string, unknown>;
+        if (sourcesCsv && params.sourcesCsv === undefined) {
+          params.sourcesCsv = sourcesCsv;
+        }
+        if (sourcesExcludeCsv && params.sourcesExcludeCsv === undefined) {
+          params.sourcesExcludeCsv = sourcesExcludeCsv;
+        }
+        config.params = params;
+      }
+    }
+  }
   return config;
 });
 
@@ -106,5 +133,4 @@ export async function moveLeadToStage(leadId: string, toStage: string) {
 export async function moveLeadToBoardColumn(leadId: string, columnKey: string) {
   await api.post(apiPath(`/leads/${leadId}/board`), { columnKey });
 }
-
 export default api;
