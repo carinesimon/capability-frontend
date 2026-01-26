@@ -14,6 +14,7 @@ import { getAccessToken } from "@/lib/auth";
 import Clock from "@/components/Clock";
 import PdfExports from "@/components/PdfExports";
 import { reportingApi } from "@/lib/reporting";
+import SourcesFilter from "@/components/SourcesFilter";
 import {
   BarChart,
   Bar,
@@ -1028,14 +1029,9 @@ const [filtersOpen, setFiltersOpen] = useState(false);
   const [funnelOpen, setFunnelOpen] = useState(false);
   const [comparePrev, setComparePrev] =
     useState<boolean>(true);
-  const [sourcesInclude, setSourcesInclude] = useState<
-    string[]
-  >([]);
-  const [sourcesExclude, setSourcesExclude] = useState<
-    string[]
-  >([]);
-  const [setterIds, setSetterIds] = useState<string[]>([]);
+   const [setterIds, setSetterIds] = useState<string[]>([]);
   const [closerIds, setCloserIds] = useState<string[]>([]);
+
 
   const fromISO = range.from ? toISODate(range.from) : undefined;
   const toISO = range.to ? toISODate(range.to) : undefined;
@@ -1047,20 +1043,6 @@ const [filtersOpen, setFiltersOpen] = useState(false);
     () => asDate(range.to) ?? new Date(),
     [range.to]
   );
-  const sourcesCsv = useMemo(
-    () =>
-      sourcesInclude.length > 0
-        ? sourcesInclude.join(",")
-        : undefined,
-    [sourcesInclude]
-  );
-  const sourcesExcludeCsv = useMemo(
-    () =>
-      sourcesExclude.length > 0
-        ? sourcesExclude.join(",")
-        : undefined,
-    [sourcesExclude]
-  );
   const setterIdsCsv = useMemo(
     () => (setterIds.length > 0 ? setterIds.join(",") : undefined),
     [setterIds]
@@ -1069,14 +1051,13 @@ const [filtersOpen, setFiltersOpen] = useState(false);
     () => (closerIds.length > 0 ? closerIds.join(",") : undefined),
     [closerIds]
   );
+
   const filterCsvParams = useMemo(
     () => ({
-      sourcesCsv,
-      sourcesExcludeCsv,
       setterIdsCsv,
       closerIdsCsv,
     }),
-    [sourcesCsv, sourcesExcludeCsv, setterIdsCsv, closerIdsCsv]
+    [setterIdsCsv, closerIdsCsv]
   );
 
   // ========= FUNNEL METRICS (pour les tuiles + Funnel) =========
@@ -1331,8 +1312,7 @@ const neutralKpiCell =
     return () => {
       cancelled = true;
     };
-  }, [authChecked, authError, fromISO, toISO, tz]);
-
+  }, [authChecked, authError, fromISO, toISO, tz, filterCsvParams]);
    // Data (courant)
   useEffect(() => {
     if (!authChecked || authError) return;
@@ -4801,79 +4781,7 @@ function KpiBox({
                   />
                 </div>
 
-                <div>
-                  <div className="label">
-                    Sources (inclure)
-                  </div>
-                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
-                    {filterOptionsLoading ? (
-                      <div className="text-xs text-[--muted]">
-                        Chargement…
-                      </div>
-                    ) : (filterOptions?.sources?.length ?? 0) > 0 ? (
-                      filterOptions?.sources.map((source) => (
-                        <label
-                          key={`src-inc-${source}`}
-                          className="flex items-center gap-2 text-xs"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={sourcesInclude.includes(source)}
-                            onChange={() =>
-                              toggleFilterValue(
-                                source,
-                                sourcesInclude,
-                                setSourcesInclude
-                              )
-                            }
-                          />
-                          <span>{source}</span>
-                        </label>
-                      ))
-                    ) : (
-                      <div className="text-xs text-[--muted]">
-                        Aucune source.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="label">
-                    Sources (exclure)
-                  </div>
-                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
-                    {filterOptionsLoading ? (
-                      <div className="text-xs text-[--muted]">
-                        Chargement…
-                      </div>
-                    ) : (filterOptions?.sources?.length ?? 0) > 0 ? (
-                      filterOptions?.sources.map((source) => (
-                        <label
-                          key={`src-exc-${source}`}
-                          className="flex items-center gap-2 text-xs"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={sourcesExclude.includes(source)}
-                            onChange={() =>
-                              toggleFilterValue(
-                                source,
-                                sourcesExclude,
-                                setSourcesExclude
-                              )
-                            }
-                          />
-                          <span>{source}</span>
-                        </label>
-                      ))
-                    ) : (
-                      <div className="text-xs text-[--muted]">
-                        Aucune source.
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <SourcesFilter />
 
                 <div>
                   <div className="label">Setters</div>
