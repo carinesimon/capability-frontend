@@ -1,6 +1,6 @@
 // frontend/src/lib/api.ts
 import axios from "axios";
-import type { AxiosRequestHeaders } from "axios";import type { AxiosRequestHeaders } from "axios";
+import type { AxiosRequestHeaders } from "axios";
 import { getAccessToken, clearAccessToken } from "./auth";
 import { getGlobalSourcesFilters } from "./globalSourcesFilters";
 
@@ -152,5 +152,6 @@ export async function moveLeadToBoardColumn(leadId: string, columnKey: string) {
   await api.post(apiPath(`/leads/${leadId}/board`), { columnKey });
 }
 export default api;
+
 
 
