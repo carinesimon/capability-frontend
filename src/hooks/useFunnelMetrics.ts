@@ -46,7 +46,9 @@ export type Timezone = string; // ex: 'Europe/Paris', 'Africa/Abidjan', ...
 export function useFunnelMetrics(
   fromDate?: Date | null,
   toDate?: Date | null,
-  tz?: Timezone
+  tz?: Timezone,
+  sourcesCsv?: string,
+  sourcesExcludeCsv?: string
 ) {
   const [data, setData] = useState<FunnelTotals | {}>({});
   const [loading, setLoading] = useState(false);
@@ -64,8 +66,8 @@ export function useFunnelMetrics(
         setLoading(true);
         setError(null);
 
-        const res = await api.get<FunnelTotals>("/metrics/funnel", {
-          params: { from, to, tz }, // ✅ on envoie le tz au backend
+    const res = await api.get<FunnelTotals>("/metrics/funnel", {
+          params: { from, to, tz, sourcesCsv, sourcesExcludeCsv }, // ✅ on envoie le tz au backend
         });
 
         if (cancelled) return;
@@ -80,8 +82,14 @@ export function useFunnelMetrics(
     }
 
     load();
-  }, [fromDate?.getTime(), toDate?.getTime(), tz]); // ✅ tz dans les deps
-
+}, [
+    fromDate?.getTime(),
+    toDate?.getTime(),
+    tz,
+    sourcesCsv,
+    sourcesExcludeCsv,
+  ]); // ✅ tz dans les deps
   return { data, loading, error };
 }
+
 
