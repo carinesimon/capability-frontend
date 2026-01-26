@@ -6,6 +6,7 @@ import api from "@/lib/api";
 import { currentMonthRange } from "@/lib/date";
 import Sidebar from "@/components/Sidebar";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
+
 import ClosersRevenueBar from "@/components/charts/ClosersRevenueBar";
 import SettersLeadsBar from "@/components/charts/SettersLeadsBar";
 import RankingTable from "@/components/RankingTable";
@@ -15,6 +16,7 @@ import Clock from "@/components/Clock";
 import PdfExports from "@/components/PdfExports";
 import { reportingApi } from "@/lib/reporting";
 import SourcesFilter from "@/components/SourcesFilter";
+import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 import {
   BarChart,
   Bar,
@@ -1001,8 +1003,12 @@ function normalizeTotals(
 
 /* ============================= PAGE ============================= */
 export default function DashboardPage() {
+  const debugFilters =
+    process.env.NEXT_PUBLIC_DEBUG_FILTERS === "true" &&
+    process.env.NODE_ENV !== "production";
   const router = useRouter();
   const search = useSearchParams();
+  const { sources, excludeSources } = useGlobalFilters();
   const view = (search.get("view") || "home") as
     | "home"
     | "closers"
@@ -1033,6 +1039,17 @@ const [filtersOpen, setFiltersOpen] = useState(false);
     useState<boolean>(true);
    const [setterIds, setSetterIds] = useState<string[]>([]);
   const [closerIds, setCloserIds] = useState<string[]>([]);
+
+  const buildFilterState = (stateRange: Range) => ({
+    from: stateRange.from ? toISODate(stateRange.from) : undefined,
+    to: stateRange.to ? toISODate(stateRange.to) : undefined,
+    tz,
+    sources,
+    excludeSources,
+    setterIds,
+    closerIds,
+    tags: [] as string[],
+  });
 
 
   const fromISO = range.from ? toISODate(range.from) : undefined;
@@ -2567,6 +2584,11 @@ function KpiBox({
               type="button"
               className="btn btn-ghost"
               onClick={() => {
+                if (debugFilters) {
+                  console.info("[Filters] open panel", {
+                    state: buildFilterState(range),
+                  });
+                }
                 setDraftRange(range);
                 setFiltersOpen(true);
               }}
@@ -4929,8 +4951,22 @@ function KpiBox({
                     type="button"
                     className="btn btn-primary"
                     onClick={() => {
+                      if (debugFilters) {
+                        console.info("[Filters] apply", {
+                          previousAppliedState: buildFilterState(range),
+                          nextAppliedState: buildFilterState(draftRange),
+                        });
+                      }
                       setRange(draftRange);
                       setFiltersOpen(false);
+                      if (debugFilters && typeof window !== "undefined") {
+                        setTimeout(() => {
+                          console.info("[Filters] url after sync", {
+                            search: window.location.search,
+                            href: window.location.href,
+                          });
+                        }, 0);
+                      }
                     }}
                   >
                     Appliquer
@@ -4956,3 +4992,4 @@ function KpiBox({
     </div>
   );
 }
+
