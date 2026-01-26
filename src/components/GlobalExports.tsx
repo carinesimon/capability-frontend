@@ -6,7 +6,6 @@ import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 type Props = {
   from?: string;
   to?: string;
-  
 };
 
 function buildParams(
