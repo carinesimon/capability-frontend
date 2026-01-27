@@ -276,6 +276,9 @@ function arraysEqual(a: string[], b: string[]) {
   }
   return true;
 }
+function normalizeFilterValues(values: string[]) {
+  return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+}
 function toISODate(d: Date | string) {
   const dd = d instanceof Date ? d : new Date(d);
   const y = dd.getFullYear();
@@ -1131,49 +1134,132 @@ export default function DashboardPage() {
     () => asDate(range.to) ?? new Date(),
     [range.to]
   );
+  const normalizedSetterIdsKey = useMemo(
+    () => normalizeFilterValues(setterIds).join(","),
+    [setterIds]
+  );
+  const normalizedCloserIdsKey = useMemo(
+    () => normalizeFilterValues(closerIds).join(","),
+    [closerIds]
+  );
+  const normalizedTagsKey = useMemo(
+    () => normalizeFilterValues(tags).join(","),
+    [tags]
+  );
+  const normalizedSourcesKey = useMemo(
+    () => normalizeFilterValues(sources).join(","),
+    [sources]
+  );
+  const normalizedExcludeSourcesKey = useMemo(
+    () => normalizeFilterValues(excludeSources).join(","),
+    [excludeSources]
+  );
+  const normalizedSetterIds = useMemo(
+    () => (normalizedSetterIdsKey ? normalizedSetterIdsKey.split(",") : []),
+    [normalizedSetterIdsKey]
+  );
+  const normalizedCloserIds = useMemo(
+    () => (normalizedCloserIdsKey ? normalizedCloserIdsKey.split(",") : []),
+    [normalizedCloserIdsKey]
+  );
+  const normalizedTags = useMemo(
+    () => (normalizedTagsKey ? normalizedTagsKey.split(",") : []),
+    [normalizedTagsKey]
+  );
+  const normalizedSources = useMemo(
+    () => (normalizedSourcesKey ? normalizedSourcesKey.split(",") : []),
+    [normalizedSourcesKey]
+  );
+  const normalizedExcludeSources = useMemo(
+    () =>
+      normalizedExcludeSourcesKey
+        ? normalizedExcludeSourcesKey.split(",")
+        : [],
+    [normalizedExcludeSourcesKey]
+  );
   const filterParams = useMemo(
     () =>
       buildReportingFilterParams({
         from: fromISO,
         to: toISO,
         tz,
-        setterIds,
-        closerIds,
-        tags,
-        sources,
-        excludeSources,
+        setterIds: normalizedSetterIds,
+        closerIds: normalizedCloserIds,
+        tags: normalizedTags,
+        sources: normalizedSources,
+        excludeSources: normalizedExcludeSources,
       }),
-    [fromISO, toISO, tz, setterIds, closerIds, tags, sources, excludeSources]
+    [
+      fromISO,
+      toISO,
+      tz,
+      normalizedSetterIds,
+      normalizedCloserIds,
+      normalizedTags,
+      normalizedSources,
+      normalizedExcludeSources,
+    ]
   );
-  const filterParamsKey = useMemo(
-    () => JSON.stringify(filterParams),
-    [filterParams]
-  );
+  const filterParamsKey = useMemo(() => {
+    const keyPayload = {
+      from: fromISO,
+      to: toISO,
+      tz,
+      setterIds: normalizedSetterIdsKey,
+      closerIds: normalizedCloserIdsKey,
+      tags: normalizedTagsKey,
+      sources: normalizedSourcesKey,
+      excludeSources: normalizedExcludeSourcesKey,
+    };
+    return JSON.stringify(keyPayload);
+  }, [
+    fromISO,
+    toISO,
+    tz,
+    normalizedSetterIdsKey,
+    normalizedCloserIdsKey,
+    normalizedTagsKey,
+    normalizedSourcesKey,
+    normalizedExcludeSourcesKey,
+  ]);
   const filterOptionsParams = useMemo(
     () =>
       buildReportingFilterParams({
         from: fromISO,
         to: toISO,
         tz,
-        sources,
-        excludeSources,
+        sources: normalizedSources,
+        excludeSources: normalizedExcludeSources,
       }),
-    [fromISO, toISO, tz, sources, excludeSources]
+    [fromISO, toISO, tz, normalizedSources, normalizedExcludeSources]
   );
   const filterOptionsParamsKey = useMemo(
-    () => JSON.stringify(filterOptionsParams),
-    [filterOptionsParams]
+    () =>
+      JSON.stringify({
+        from: fromISO,
+        to: toISO,
+        tz,
+        sources: normalizedSourcesKey,
+        excludeSources: normalizedExcludeSourcesKey,
+      }),
+    [fromISO, toISO, tz, normalizedSourcesKey, normalizedExcludeSourcesKey]
   );
   const filterParamsWithoutDates = useMemo(
     () =>
       buildReportingFilterParams({
-        setterIds,
-        closerIds,
-        tags,
-        sources,
-        excludeSources,
+        setterIds: normalizedSetterIds,
+        closerIds: normalizedCloserIds,
+        tags: normalizedTags,
+        sources: normalizedSources,
+        excludeSources: normalizedExcludeSources,
       }),
-    [setterIds, closerIds, tags, sources, excludeSources]
+    [
+      normalizedSetterIds,
+      normalizedCloserIds,
+      normalizedTags,
+      normalizedSources,
+      normalizedExcludeSources,
+    ]
   );
 
   const isSameRange = (a: Range, b: Range) => {
@@ -1316,10 +1402,11 @@ const funnelData: FunnelProps["data"] = {
   const [salesWeekly, setSalesWeekly] = useState<
     SalesWeeklyItem[]
   >([]);
-    const [ops, setOps] = useState<WeeklyOpsRow[]>([]);
+  const [ops, setOps] = useState<WeeklyOpsRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [stageSeriesWarning, setStageSeriesWarning] = useState<string | null>(null);
   const [duos, setDuos] = useState<DuoRow[]>([]);
+
   // Séries par jour : call requests / calls total / calls answered
   const [mCallReq, setMCallReq] =
     useState<MetricSeriesOut | null>(null);
@@ -1733,8 +1820,7 @@ const neutralKpiCell =
     return () => {
       cancelled = true;
     };
-  }, [authChecked, authError, fromISO, toISO, tz]);
-
+  }, [authChecked, authError, filterParamsKey]);
   
   // Classements (setters / closers)
   // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
@@ -5215,7 +5301,9 @@ function KpiBox({
                   <button
                     type="button"
                     className="btn btn-primary"
+                    disabled={loading}
                     onClick={() => {
+                      if (loading) return;
                       if (debugFilters) {
                         console.info("[Filters] apply", {
                           previousAppliedState: buildFilterState(range),
@@ -5280,5 +5368,6 @@ function KpiBox({
     </div>
   );
 }
+
 
 
