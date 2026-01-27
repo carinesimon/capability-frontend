@@ -1,5 +1,6 @@
 "use client";
 import { reportingApi } from "@/lib/reporting";
+import { buildReportingFilterParams } from "@/lib/reportingFilters";
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import api from "@/lib/api";
@@ -572,10 +573,15 @@ export default function ProspectsPage() {
   (async () => {
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const cancelFilters = buildReportingFilterParams({
+        from: fromISO,
+        to: toISO,
+        tz,
+      });
       const [rv0, rv1, rv2] = await Promise.all([
-        reportingApi.stageSeries("RV0_CANCELED", fromISO, toISO, tz),
-        reportingApi.stageSeries("RV1_CANCELED", fromISO, toISO, tz),
-        reportingApi.stageSeries("RV2_CANCELED", fromISO, toISO, tz),
+        reportingApi.stageSeries("RV0_CANCELED", cancelFilters),
+        reportingApi.stageSeries("RV1_CANCELED", cancelFilters),
+        reportingApi.stageSeries("RV2_CANCELED", cancelFilters),
       ]);
       if (!cancelled) {
         const v0 = rv0?.total ?? 0;
