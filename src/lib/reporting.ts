@@ -1,6 +1,6 @@
 // src/lib/reporting.ts
 import api from "@/lib/api";
-
+import type { ReportingFilterParams } from "@/lib/reportingFilters";
 /** ---- Types alignés au backend ---- */
 export type LeadsReceivedOut = {
 
@@ -116,11 +116,6 @@ function mergeByDay(keys: string[], seriesMap: Record<string, Array<{ day: strin
   });
 }
 
-export type ReportingFilterParams = {
-  sourcesCsv?: string;
-  sourcesExcludeCsv?: string;
-};
-
 export const reportingApi = {  /** Tous ces endpoints acceptent maintenant le fuseau IANA (tz) */
   leadsReceived: (from?: string, to?: string, tz?: string) =>
     api.get<LeadsReceivedOut>("/reporting/leads-received", { params: { from, to, tz } }).then(r => r.data),
@@ -152,14 +147,11 @@ export const reportingApi = {  /** Tous ces endpoints acceptent maintenant le fu
    */
  stageSeries: (
     stage: string,
-    from?: string,
-    to?: string,
-    tz?: string,
-    filters?: ReportingFilterParams
+    params: ReportingFilterParams
   ) =>
     api
       .get<MetricSeriesOut>("/metrics/stage-series", {
-        params: { stage, from, to, tz, ...filters },
+        params: { stage, ...params },
       })
       .then(r => r.data),
 
@@ -168,21 +160,16 @@ export const reportingApi = {  /** Tous ces endpoints acceptent maintenant le fu
    * [{ day, RV0_CANCELED, RV1_CANCELED, RV2_CANCELED, total }]
    * déjà fusionné, prêt pour Recharts.
    */
-  canceledDaily: async (
-    from?: string,
-    to?: string,
-    tz?: string,
-    filters?: ReportingFilterParams
-  ) => {
+  canceledDaily: async (params: ReportingFilterParams) => {
     const [rv0, rv1, rv2] = await Promise.all([
       api.get<MetricSeriesOut>("/metrics/stage-series", {
-        params: { stage: "RV0_CANCELED", from, to, tz, ...filters },
+        params: { stage: "RV0_CANCELED", ...params },
       }),
       api.get<MetricSeriesOut>("/metrics/stage-series", {
-        params: { stage: "RV1_CANCELED", from, to, tz, ...filters },
+        params: { stage: "RV1_CANCELED", ...params },
       }),
       api.get<MetricSeriesOut>("/metrics/stage-series", {
-        params: { stage: "RV2_CANCELED", from, to, tz, ...filters },
+        params: { stage: "RV2_CANCELED", ...params },
       }),
     ]);
 
