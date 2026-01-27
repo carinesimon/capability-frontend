@@ -1,7 +1,8 @@
 "use client";
 
 import axios from "axios";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { AxiosRequestConfig } from "axios";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import { currentMonthRange } from "@/lib/date";
@@ -21,6 +22,10 @@ import {
   buildReportingFilterParams,
   parseReportingFiltersFromSearchParams,
   updateSearchParamsWithReportingFilters,
+} from "@/lib/reportingFilters";
+import type {
+  ReportingFilterParams,
+  ReportingFilterState,
 } from "@/lib/reportingFilters";
 import {
   BarChart,
@@ -47,6 +52,20 @@ const TIMEZONES = [
 ];
 
 const MAX_RANGE_START = new Date(2023, 0, 1);
+
+const STAGE_SERIES_MAP = {
+  callRequests: ["CALL_REQUESTED"],
+  callsTotal: ["CALL_ATTEMPT"],
+  callsAnswered: ["CALL_ANSWERED"],
+  rv0NoShow: ["RV0_NO_SHOW"],
+  rv0Honored: ["RV0_HONORED"],
+  rv1Canceled: ["RV1_CANCELED"],
+  rv1Postponed: ["RV1_POSTPONED"],
+  rv2Canceled: ["RV2_CANCELED"],
+  rv2Postponed: ["RV2_POSTPONED"],
+} as const;
+
+type StageSeriesKey = keyof typeof STAGE_SERIES_MAP;
 
 /* ---------- KPI Ratio chip ---------- */
 const KpiRatio = ({
@@ -291,6 +310,62 @@ const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
 const fmtPct = (num?: number | null, den?: number | null) =>
   den && den > 0 ? `${Math.round(((num || 0) / den) * 100)}%` : "—";
 
+const EMPTY_METRIC_SERIES: MetricSeriesOut = {
+  total: 0,
+  byDay: [],
+};
+
+const mergeMetricSeries = (seriesList: MetricSeriesOut[]) => {
+  const map = new Map<string, number>();
+  for (const series of seriesList) {
+    const rows = series?.byDay ?? [];
+    for (const row of rows) {
+      const key =
+        row?.day?.slice?.(0, 10) ||
+        new Date(row.day).toISOString().slice(0, 10);
+      map.set(key, (map.get(key) ?? 0) + Number(row.count || 0));
+    }
+  }
+  const byDay = [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, count]) => ({ day, count }));
+  const total = byDay.reduce((sum, row) => sum + row.count, 0);
+  return { total, byDay } as MetricSeriesOut;
+};
+
+const extractErrorMessage = (error: unknown) => {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data;
+    if (typeof data === "string") return data;
+    if (data && typeof data === "object") {
+      if (typeof (data as { message?: unknown }).message === "string") {
+        return (data as { message: string }).message;
+      }
+      if (typeof (data as { error?: unknown }).error === "string") {
+        return (data as { error: string }).error;
+      }
+    }
+  }
+  if (error instanceof Error) return error.message;
+  return "";
+};
+
+const isTagsUnsupportedError = (error: unknown) => {
+  if (!axios.isAxiosError(error)) return false;
+  const status = error.response?.status ?? 0;
+  if (status !== 400 && status !== 422) return false;
+  const message = extractErrorMessage(error).toLowerCase();
+  return message.includes("tag") || message.includes("tagscsv");
+};
+
+const isStageSeriesInvalidError = (error: unknown, url?: string) => {
+  if (!url?.includes("/metrics/stage-series")) return false;
+  if (!axios.isAxiosError(error)) return false;
+  if (error.response?.status !== 400) return false;
+  const message = extractErrorMessage(error).toLowerCase();
+  return message.includes("stage invalide") || message.includes("stage est requis");
+};
+
 /* ---------- Tooltip (Recharts) ---------- */
 function ProTooltip({
   active,
@@ -360,6 +435,10 @@ type DrillItem = {
   stage?: string;
   createdAt?: string;
   stageUpdatedAt?: string;
+};
+type DrillResponse = {
+  items?: DrillItem[];
+  __error?: string;
 };
 function DrillModal({
   title,
@@ -1072,7 +1151,9 @@ export default function DashboardPage() {
   const [tz, setTz] = useState<string>(
     () => initialFilters.tz ?? "Europe/Paris"
   );
-
+  const [draftTz, setDraftTz] = useState<string>(
+    () => initialFilters.tz ?? "Europe/Paris"
+  );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [funnelOpen, setFunnelOpen] = useState(false);
   const [comparePrev, setComparePrev] =
@@ -1134,61 +1215,57 @@ export default function DashboardPage() {
     () => asDate(range.to) ?? new Date(),
     [range.to]
   );
-  const normalizedSetterIdsKey = useMemo(
-    () => normalizeFilterValues(setterIds).join(","),
+  const normalizedSetterIds = useMemo(
+    () => normalizeFilterValues(setterIds),
     [setterIds]
   );
-  const normalizedCloserIdsKey = useMemo(
-    () => normalizeFilterValues(closerIds).join(","),
+  const normalizedCloserIds = useMemo(
+    () => normalizeFilterValues(closerIds),
     [closerIds]
   );
-  const normalizedTagsKey = useMemo(
-    () => normalizeFilterValues(tags).join(","),
+  const normalizedTags = useMemo(
+    () => normalizeFilterValues(tags),
     [tags]
   );
-  const normalizedSourcesKey = useMemo(
-    () => normalizeFilterValues(sources).join(","),
+  const normalizedSources = useMemo(
+    () => normalizeFilterValues(sources),
     [sources]
   );
-  const normalizedExcludeSourcesKey = useMemo(
-    () => normalizeFilterValues(excludeSources).join(","),
+  const normalizedExcludeSources = useMemo(
+    () => normalizeFilterValues(excludeSources),
     [excludeSources]
   );
-  const normalizedSetterIds = useMemo(
-    () => (normalizedSetterIdsKey ? normalizedSetterIdsKey.split(",") : []),
-    [normalizedSetterIdsKey]
+  const normalizedSetterIdsKey = useMemo(
+    () => normalizedSetterIds.join(","),
+    [normalizedSetterIds]
   );
-  const normalizedCloserIds = useMemo(
-    () => (normalizedCloserIdsKey ? normalizedCloserIdsKey.split(",") : []),
-    [normalizedCloserIdsKey]
+  const normalizedCloserIdsKey = useMemo(
+    () => normalizedCloserIds.join(","),
+    [normalizedCloserIds]
   );
-  const normalizedTags = useMemo(
-    () => (normalizedTagsKey ? normalizedTagsKey.split(",") : []),
-    [normalizedTagsKey]
+  const normalizedTagsKey = useMemo(
+    () => normalizedTags.join(","),
+    [normalizedTags]
   );
-  const normalizedSources = useMemo(
-    () => (normalizedSourcesKey ? normalizedSourcesKey.split(",") : []),
-    [normalizedSourcesKey]
+  const normalizedSourcesKey = useMemo(
+    () => normalizedSources.join(","),
+    [normalizedSources]
   );
-  const normalizedExcludeSources = useMemo(
-    () =>
-      normalizedExcludeSourcesKey
-        ? normalizedExcludeSourcesKey.split(",")
-        : [],
-    [normalizedExcludeSourcesKey]
+  const normalizedExcludeSourcesKey = useMemo(
+    () => normalizedExcludeSources.join(","),
+    [normalizedExcludeSources]
   );
-  const filterParams = useMemo(
-    () =>
-      buildReportingFilterParams({
-        from: fromISO,
-        to: toISO,
-        tz,
-        setterIds: normalizedSetterIds,
-        closerIds: normalizedCloserIds,
-        tags: normalizedTags,
-        sources: normalizedSources,
-        excludeSources: normalizedExcludeSources,
-      }),
+  const appliedFilterState = useMemo<ReportingFilterState>(
+    () => ({
+      from: fromISO,
+      to: toISO,
+      tz,
+      setterIds: normalizedSetterIds,
+      closerIds: normalizedCloserIds,
+      tags: normalizedTags,
+      sources: normalizedSources,
+      excludeSources: normalizedExcludeSources,
+    }),
     [
       fromISO,
       toISO,
@@ -1200,66 +1277,60 @@ export default function DashboardPage() {
       normalizedExcludeSources,
     ]
   );
-  const filterParamsKey = useMemo(() => {
-    const keyPayload = {
-      from: fromISO,
-      to: toISO,
-      tz,
-      setterIds: normalizedSetterIdsKey,
-      closerIds: normalizedCloserIdsKey,
-      tags: normalizedTagsKey,
-      sources: normalizedSourcesKey,
-      excludeSources: normalizedExcludeSourcesKey,
-    };
-    return JSON.stringify(keyPayload);
-  }, [
-    fromISO,
-    toISO,
-    tz,
-    normalizedSetterIdsKey,
-    normalizedCloserIdsKey,
-    normalizedTagsKey,
-    normalizedSourcesKey,
-    normalizedExcludeSourcesKey,
-  ]);
-  const filterOptionsParams = useMemo(
-    () =>
-      buildReportingFilterParams({
-        from: fromISO,
-        to: toISO,
-        tz,
-        sources: normalizedSources,
-        excludeSources: normalizedExcludeSources,
-      }),
-    [fromISO, toISO, tz, normalizedSources, normalizedExcludeSources]
+  const buildParams = useCallback(
+    (
+      overrides: Partial<ReportingFilterState> = {},
+      options: { includeTags?: boolean } = {}
+    ): ReportingFilterParams => {
+      const nextFilters = {
+        ...appliedFilterState,
+        ...overrides,
+      };
+      if (options.includeTags === false) {
+        nextFilters.tags = [];
+      }
+      return buildReportingFilterParams(nextFilters);
+    },
+    [appliedFilterState]
   );
-  const filterOptionsParamsKey = useMemo(
+  const filterParamsKey = useMemo(
     () =>
       JSON.stringify({
         from: fromISO,
         to: toISO,
         tz,
+        setterIds: normalizedSetterIdsKey,
+        closerIds: normalizedCloserIdsKey,
+        tags: normalizedTagsKey,
         sources: normalizedSourcesKey,
         excludeSources: normalizedExcludeSourcesKey,
       }),
-    [fromISO, toISO, tz, normalizedSourcesKey, normalizedExcludeSourcesKey]
+    [
+      fromISO,
+      toISO,
+      tz,
+      normalizedSetterIdsKey,
+      normalizedCloserIdsKey,
+      normalizedTagsKey,
+      normalizedSourcesKey,
+      normalizedExcludeSourcesKey,
+    ]
+  );
+  const filterOptionsParams = useMemo(
+    () => buildParams(),
+    [buildParams]
+  );
+  const filterOptionsParamsKey = useMemo(
+    () => JSON.stringify(filterOptionsParams),
+    [filterOptionsParams]
   );
   const filterParamsWithoutDates = useMemo(
     () =>
-      buildReportingFilterParams({
-        setterIds: normalizedSetterIds,
-        closerIds: normalizedCloserIds,
-        tags: normalizedTags,
-        sources: normalizedSources,
-        excludeSources: normalizedExcludeSources,
+      buildParams({
+        from: undefined,
+        to: undefined,
       }),
-    [
-      normalizedSetterIds,
-      normalizedCloserIds,
-      normalizedTags,
-      normalizedSources,
-      normalizedExcludeSources,
-    ]
+    [buildParams]
   );
 
   const isSameRange = (a: Range, b: Range) => {
@@ -1285,6 +1356,9 @@ export default function DashboardPage() {
     }
     if (initialFilters.tz && initialFilters.tz !== tz) {
       setTz(initialFilters.tz);
+      if (!filtersOpen) {
+        setDraftTz(initialFilters.tz);
+      }
     }
     if (!arraysEqual(setterIds, initialFilters.setterIds ?? [])) {
       setSetterIds(initialFilters.setterIds ?? []);
@@ -1299,6 +1373,7 @@ export default function DashboardPage() {
     initialFilters,
     defaultFrom,
     defaultTo,
+    filtersOpen,
     range,
     setterIds,
     closerIds,
@@ -1313,10 +1388,13 @@ export default function DashboardPage() {
     setterIds?: string[];
     closerIds?: string[];
     tags?: string[];
+    sources?: string[];
+    excludeSources?: string[];
   }) => {
     const nextParams = updateSearchParamsWithReportingFilters(
       new URLSearchParams(search.toString()),
-      nextFilters
+      nextFilters,
+      { includeSources: true }
     );
     const nextQuery = nextParams.toString();
     const currentQuery = search.toString();
@@ -1427,6 +1505,10 @@ const [rv0NsWeekly, setRv0NsWeekly] = useState<Rv0NsWeek[]>(
   );
   const [filterOptions, setFilterOptions] =
     useState<FilterOptions | null>(null);
+  const [tagsOptions, setTagsOptions] = useState<string[]>([]);
+  const [availableStages, setAvailableStages] = useState<Set<string> | null>(
+    null
+  );
   const [filterOptionsLoading, setFilterOptionsLoading] =
     useState(false);
   const [filterOptionsError, setFilterOptionsError] =
@@ -1522,60 +1604,135 @@ const neutralKpiCell =
     return Array.from(new Set(tags));
   };
 
+  const availableTags = useMemo(
+    () =>
+      normalizeFilterValues([
+        ...(filterOptions?.tags ?? []),
+        ...tagsOptions,
+      ]),
+    [filterOptions?.tags, tagsOptions]
+  );
+
   const stageSeriesWarningSent = useRef(false);
-  const emptyStageSeries: MetricSeriesOut = { total: 0, byDay: [] };
+  const tagsUnsupportedEndpointsRef = useRef<Set<string>>(new Set());
 
-  const extractErrorMessage = (error: unknown) => {
-    if (axios.isAxiosError(error)) {
-      const data = error.response?.data;
-      if (typeof data === "string") return data;
-      if (data && typeof data === "object") {
-        if (typeof (data as { message?: unknown }).message === "string") {
-          return (data as { message: string }).message;
-        }
-        if (typeof (data as { error?: unknown }).error === "string") {
-          return (data as { error: string }).error;
-        }
-      }
-    }
-    if (error instanceof Error) return error.message;
-    return "";
-  };
-
-  const isStageSeriesInvalidError = (error: unknown, url?: string) => {
-    if (!url?.includes("/metrics/stage-series")) return false;
-    if (!axios.isAxiosError(error)) return false;
-    if (error.response?.status !== 400) return false;
-    const message = extractErrorMessage(error).toLowerCase();
-    return message.includes("stage invalide") || message.includes("stage est requis");
-  };
-
-  const handleStageSeriesInvalid = () => {
+  const handleStageSeriesInvalid = useCallback(() => {
     if (!stageSeriesWarningSent.current) {
       stageSeriesWarningSent.current = true;
       setStageSeriesWarning(
         "Certaines séries par stage sont indisponibles (stage invalide). Les graphiques restent stables."
       );
     }
-    return { data: emptyStageSeries } as { data: MetricSeriesOut };
-  };
+    return { data: EMPTY_METRIC_SERIES } as {
+      data: MetricSeriesOut;
+    };
+  }, []);
 
-  // Helper fetch "metric/*" safe
-  async function fetchSafeMetric(
-    url: string,
-    params: Record<string, any>
-  ) {
-    try {
-      return await api.get<MetricSeriesOut>(url, {
-        params,
-      });
-    } catch (error) {
-      if (isStageSeriesInvalidError(error, url)) {
-        return handleStageSeriesInvalid();
+  const getWithFilters = useCallback(
+    async <T,>(url: string, options: {
+      overrides?: Partial<ReportingFilterState>;
+      extraParams?: Record<string, unknown>;
+      config?: AxiosRequestConfig;
+    } = {}) => {
+      const allowTags = !tagsUnsupportedEndpointsRef.current.has(url);
+      const params = {
+        ...buildParams(options.overrides, { includeTags: allowTags }),
+        ...(options.extraParams ?? {}),
+      };
+
+      if (debugFilters) {
+        console.info("[Filters] request", { url, params });
       }
-      return { data: null } as any;
-    }
-  }
+
+      try {
+        return await api.get<T>(url, {
+          ...(options.config ?? {}),
+          params,
+        });
+      } catch (error) {
+        if (allowTags && isTagsUnsupportedError(error)) {
+          tagsUnsupportedEndpointsRef.current.add(url);
+          if (debugFilters) {
+            console.info("[Filters] tags unsupported, retrying without tags", {
+              url,
+            });
+          }
+          const retryParams = {
+            ...buildParams(options.overrides, { includeTags: false }),
+            ...(options.extraParams ?? {}),
+          };
+          return await api.get<T>(url, {
+            ...(options.config ?? {}),
+            params: retryParams,
+          });
+        }
+        throw error;
+      }
+    },
+    [buildParams, debugFilters]
+  );
+
+  const areStagesSupported = useCallback(
+    (stages: readonly string[]) => {
+      if (!availableStages || availableStages.size === 0) {
+        return true;
+      }
+      const missing = stages.filter((stage) => !availableStages.has(stage));
+      if (missing.length === 0) return true;
+      if (debugFilters) {
+        console.info("[Filters] unsupported stages skipped", {
+          missing,
+        });
+      }
+      return false;
+    },
+    [availableStages, debugFilters]
+  );
+
+  const fetchStageSeries = useCallback(
+    async (
+      stages: readonly string[],
+      overrides: Partial<ReportingFilterState> = {}
+    ) => {
+      if (!areStagesSupported(stages)) {
+        return EMPTY_METRIC_SERIES;
+      }
+
+      const results = await Promise.all(
+        stages.map(async (stage) => {
+          try {
+            const res = await getWithFilters<MetricSeriesOut>(
+              "/metrics/stage-series",
+              {
+                overrides,
+                extraParams: { stage },
+              }
+            );
+            return res?.data ?? EMPTY_METRIC_SERIES;
+          } catch (error) {
+            if (
+              isStageSeriesInvalidError(
+                error,
+                "/metrics/stage-series"
+              )
+            ) {
+              handleStageSeriesInvalid();
+              return EMPTY_METRIC_SERIES;
+            }
+            return EMPTY_METRIC_SERIES;
+          }
+        })
+      );
+      return mergeMetricSeries(results);
+    },
+    [areStagesSupported, getWithFilters, handleStageSeriesInvalid]
+  );
+
+  const fetchStageSeriesForKey = useCallback(
+    (key: StageSeriesKey, overrides: Partial<ReportingFilterState> = {}) =>
+      fetchStageSeries(STAGE_SERIES_MAP[key], overrides),
+    [fetchStageSeries]
+  );
 
 
   // Auth
@@ -1616,11 +1773,8 @@ const neutralKpiCell =
       try {
         setFilterOptionsLoading(true);
         setFilterOptionsError(null);
-        const res = await api.get<FilterOptions>(
-          "/reporting/filter-options",
-          {
-            params: filterOptionsParams,
-          }
+        const res = await getWithFilters<FilterOptions>(
+          "/reporting/filter-options"
         );
         if (cancelled) return;
         const data = res.data || {
@@ -1643,18 +1797,15 @@ const neutralKpiCell =
         if (cancelled) return;
         if (axios.isAxiosError(error) && error.response?.status === 404) {
           try {
-            const sourcesRes = await api.get<
+            const sourcesRes = await getWithFilters<
               SourceOptionPayload[] | { sources?: SourceOptionPayload[] }
-            >(
-              "/reporting/sources",
-              {
-                params: {
-                  withCounts: true,
-                  withLastSeen: true,
-                  includeUnknown: true,
-                },
-              }
-            );
+            >("/reporting/sources", {
+              extraParams: {
+                withCounts: true,
+                withLastSeen: true,
+                includeUnknown: true,
+              },
+            });
             if (cancelled) return;
             setFilterOptions((prev) => ({
               sources: normalizeSourceOptions(sourcesRes.data),
@@ -1684,7 +1835,58 @@ const neutralKpiCell =
     return () => {
       cancelled = true;
     };
-  }, [authChecked, authError, filterOptionsParamsKey]);
+  }, [authChecked, authError, filterOptionsParamsKey, getWithFilters]);
+
+  useEffect(() => {
+    if (!authChecked || authError) return;
+    let cancelled = false;
+
+    async function loadTags() {
+      try {
+        const res = await getWithFilters<
+          TagOptionPayload[] | { tags?: TagOptionPayload[] }
+        >("/reporting/tags");
+        if (cancelled) return;
+        setTagsOptions(normalizeTagOptions(res.data));
+      } catch {
+        if (!cancelled) {
+          setTagsOptions([]);
+        }
+      }
+    }
+
+    loadTags();
+    return () => {
+      cancelled = true;
+    };
+  }, [authChecked, authError, getWithFilters]);
+
+  useEffect(() => {
+    if (!authChecked || authError) return;
+    let cancelled = false;
+
+    async function loadStages() {
+      try {
+        const res = await getWithFilters<string[]>(
+          "/metrics/stages"
+        );
+        if (cancelled) return;
+        const stages = Array.isArray(res.data)
+          ? res.data.filter((stage) => typeof stage === "string")
+          : [];
+        setAvailableStages(new Set(stages));
+      } catch {
+        if (!cancelled) {
+          setAvailableStages(null);
+        }
+      }
+    }
+
+    loadStages();
+    return () => {
+      cancelled = true;
+    };
+  }, [authChecked, authError, getWithFilters]);
    // Data (courant)
   useEffect(() => {
     if (!authChecked || authError) return;
@@ -1697,18 +1899,11 @@ const neutralKpiCell =
 
         // 1) Résumés & séries hebdo
         const [sumRes, leadsRes, weeklyRes, opsRes] = await Promise.all([
-          api.get<SummaryOut>("/reporting/summary", {
-            params: filterParams,
-          }),
-          api.get<LeadsReceivedOut>("/metrics/leads-by-day", {
-            params: filterParams,
-          }),
-          api.get<SalesWeeklyItem[]>("/reporting/sales-weekly", {
-            params: filterParams,
-          }),
-          api.get<{ ok: true; rows: WeeklyOpsRow[] }>(
-            "/reporting/weekly-ops",
-            { params: filterParams }
+          getWithFilters<SummaryOut>("/reporting/summary"),
+          getWithFilters<LeadsReceivedOut>("/metrics/leads-by-day"),
+          getWithFilters<SalesWeeklyItem[]>("/reporting/sales-weekly"),
+          getWithFilters<{ ok: true; rows: WeeklyOpsRow[] }>(
+            "/reporting/weekly-ops"
           ),
         ]);
 
@@ -1723,32 +1918,20 @@ const neutralKpiCell =
 
         // 2) Séries journalières basées sur StageEvent (mêmes métriques que le funnel /metrics/funnel)
          const [m1, m2, m3] = await Promise.all([
-          fetchSafeMetric("/metrics/stage-series", {
-              ...filterParams,
-              stage: "CALL_REQUESTED",
-            }),
-          fetchSafeMetric("/metrics/stage-series", {
-            ...filterParams,
-            stage: "CALL_ATTEMPT",     // Appels passés
-          }),
-          fetchSafeMetric("/metrics/stage-series", {
-            ...filterParams,
-            stage: "CALL_ANSWERED",    // Appels répondus
-          }),
+          fetchStageSeriesForKey("callRequests"),
+          fetchStageSeriesForKey("callsTotal"),
+          fetchStageSeriesForKey("callsAnswered"),
         ]);
 
         if (!cancelled) {
-          setMCallReq(m1?.data || null);
-          setMCallsTotal(m2?.data || null);
-          setMCallsAnswered(m3?.data || null);
+          setMCallReq(m1 || null);
+          setMCallsTotal(m2 || null);
+          setMCallsAnswered(m3 || null);
         }
 
         // 3) RV0 no-show par semaine, à partir de StageEvent(RV0_NO_SHOW) → /metrics/stage-series
-        const rv0SeriesRes = await fetchSafeMetric("/metrics/stage-series", {
-          ...filterParams,
-          stage: "RV0_NO_SHOW",
-        });
-        const series = rv0SeriesRes?.data?.byDay || [];
+        const rv0SeriesRes = await fetchStageSeriesForKey("rv0NoShow");
+        const series = rv0SeriesRes?.byDay || [];
 
         // Helpers semaine (UTC, lundi → dimanche)
         function mondayLocal(d: Date) {
@@ -1820,8 +2003,15 @@ const neutralKpiCell =
     return () => {
       cancelled = true;
     };
-  }, [authChecked, authError, filterParamsKey]);
-  
+}, [
+    authChecked,
+    authError,
+    filterParamsKey,
+    fetchStageSeriesForKey,
+    fromISO,
+    getWithFilters,
+    toISO,
+  ]);  
   // Classements (setters / closers)
   // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
 // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
@@ -1830,14 +2020,12 @@ useEffect(() => {
   let cancelled = false;
 
   async function loadSpotlight() {
-    const params = { ...filterParams };
     try {
       // 1) Tentative endpoints spotlight
       const [sRes, cRes] = await Promise.all([
-        api.get<SetterRow[]>("/reporting/spotlight-setters", { params }),
-        api.get<CloserRow[]>("/reporting/spotlight-closers", { params }),
+        getWithFilters<SetterRow[]>("/reporting/spotlight-setters"),
+        getWithFilters<CloserRow[]>("/reporting/spotlight-closers"),
       ]);
-
       if (cancelled) return;
 
       const settersRaw = sRes.data || [];
@@ -1903,8 +2091,8 @@ useEffect(() => {
     // 2) Fallback anciens endpoints
     try {
       const [sRes2, cRes2] = await Promise.all([
-        api.get<any[]>("/reporting/setters", { params }),
-        api.get<any[]>("/reporting/closers", { params }),
+        getWithFilters<any[]>("/reporting/setters"),
+        getWithFilters<any[]>("/reporting/closers"),
       ]);
       if (cancelled) return;
 
@@ -2037,8 +2225,8 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [authChecked, authError, filterParamsKey]);
- // (NOUVEAU) Annulés par jour via historisation (StageEvent)
+}, [authChecked, authError, filterParamsKey, getWithFilters]);
+  // (NOUVEAU) Annulés par jour via historisation (StageEvent)
 /*
 useEffect(() => {
   let cancelled = false;
@@ -2127,13 +2315,11 @@ useEffect(() => {
     let cancelled = false;
 
     async function loadDuos() {
-      try {
-        const res = await api.get<{ ok?: boolean; rows?: DuoRow[] }>(
-          "/reporting/duos",
-          {
-            params: filterParams,
-          }
-        );
+     try {
+        const res = await getWithFilters<{
+          ok?: boolean;
+          rows?: DuoRow[];
+        }>("/reporting/duos");
         if (cancelled) return;
 
         const rows =
@@ -2158,8 +2344,8 @@ useEffect(() => {
 
     loadDuos();
     return () => { cancelled = true; };
-  }, [authChecked, authError, filterParamsKey]);
-    // Enrichissements (taux) — pas de hooks conditionnels
+  }, [authChecked, authError, filterParamsKey, getWithFilters]);
+  // Enrichissements (taux) — pas de hooks conditionnels
   const settersWithRates = useMemo(() => {
     return setters.map((s) => {
       const qualDen = s.leadsReceived || 0;
@@ -2313,24 +2499,18 @@ const kpiSales = summary?.totals?.salesCount ?? 0;
         const prevFrom = new Date(
           prevTo.getTime() - span
         );
-        const prevParams = buildReportingFilterParams({
+        const prevOverrides = {
           from: toISODate(prevFrom),
           to: toISODate(prevTo),
-          tz,
-          setterIds,
-          closerIds,
-          tags,
-          sources,
-          excludeSources,
-        });
+        };
         const [sum, leads] = await Promise.all([
-          api.get<SummaryOut>("/reporting/summary", {
-            params: prevParams,
+          getWithFilters<SummaryOut>("/reporting/summary", {
+            overrides: prevOverrides,
           }),
-          api.get<LeadsReceivedOut>(
+          getWithFilters<LeadsReceivedOut>(
             "/reporting/leads-received",
             {
-              params: prevParams,
+              overrides: prevOverrides,
             }
           ),
         ]);
@@ -2341,7 +2521,7 @@ const kpiSales = summary?.totals?.salesCount ?? 0;
         setLeadsPrev(null);
       }
     })();
-  }, [comparePrev, fromISO, toISO, filterParamsKey]);
+  }, [comparePrev, fromISO, toISO, filterParamsKey, getWithFilters]);
   const kpiRevenuePrev = summaryPrev?.totals?.revenue ?? 0;
   const kpiLeadsPrev = leadsPrev?.total ?? 0;
   const kpiRv1HonoredPrev =
@@ -2359,12 +2539,6 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
     /*const [canceledDaily, setCanceledDaily] = useState<{ total: number; byDay: Array<{
       day: string; RV0_CANCELED: number; RV1_CANCELED: number; RV2_CANCELED: number; total: number;
     }>}>({ total: 0, byDay: [] });*/
-
-  type MetricSeriesRow = { day: string; count: number };
-  type MetricSeriesOut = {
-    total: number;
-    byDay: MetricSeriesRow[];
-  };
 
   // déjà ton canceledDaily plus bas, on le garde mais on va le modifier après
   const [canceledDaily, setCanceledDaily] = useState<{
@@ -2385,11 +2559,7 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
       }
 
       try {
-        // on utilise ton helper robuste qui gère RV0_HONORED / RV0_HONOURED
-         const res = await fetchStageSeriesAny(
-          "RV0_HONORED",
-          filterParams
-        );
+        const res = await fetchStageSeriesForKey("rv0Honored");
         if (!cancelled) setRv0Daily(res);
       } catch {
         if (!cancelled) setRv0Daily(null);
@@ -2399,8 +2569,8 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
     return () => {
       cancelled = true;
     };
-  }, [filterParamsKey]);
-useEffect(() => {
+  }, [filterParamsKey, fetchStageSeriesForKey, fromISO, toISO]);
+  useEffect(() => {
   let cancelled = false;
 
   (async () => {
@@ -2412,10 +2582,10 @@ useEffect(() => {
 
       // On récupère 4 séries : RV1 annulé / reporté, RV2 annulé / reporté
      const [rv1C, rv1P, rv2C, rv2P] = await Promise.all([
-        fetchStageSeriesAny("RV1_CANCELED", filterParams),
-        fetchStageSeriesAny("RV1_POSTPONED", filterParams),
-        fetchStageSeriesAny("RV2_CANCELED", filterParams),
-        fetchStageSeriesAny("RV2_POSTPONED", filterParams),
+        fetchStageSeriesForKey("rv1Canceled"),
+        fetchStageSeriesForKey("rv1Postponed"),
+        fetchStageSeriesForKey("rv2Canceled"),
+        fetchStageSeriesForKey("rv2Postponed"),
       ]);
       const map = new Map<string, { rv1: number; rv2: number }>();
 
@@ -2472,9 +2642,9 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [filterParamsKey]);
+}, [filterParamsKey, fetchStageSeriesForKey, fromISO, toISO]);
   // ======= DRILLS : helpers endpoints =======
-  async function openAppointmentsDrill(params: {
+async function openAppointmentsDrill(params: {
     title: string;
     type?: "RV0" | "RV1" | "RV2";
     status?:
@@ -2486,17 +2656,18 @@ useEffect(() => {
     from?: string;
     to?: string;
   }) {
-    const res = await api.get(
+    const res = await getWithFilters<DrillResponse>(
       "/reporting/drill/appointments",
       {
-         params: {
-          type: params.type,
-          status: params.status,
-          limit: 2000,
-          ...filterParams,
-          from: params.from ?? fromISO,
-          to: params.to ?? toISO,
-        },
+      overrides: {
+        from: params.from ?? fromISO,
+        to: params.to ?? toISO,
+      },
+      extraParams: {
+        type: params.type,
+        status: params.status,
+        limit: 2000,
+      },
       }
     );
     setDrillTitle(params.title);
@@ -2506,10 +2677,14 @@ useEffect(() => {
 
   async function fetchSafe(
     url: string,
-    params: Record<string, any>
+    params: Record<string, any>,
+    overrides: Partial<ReportingFilterState> = {}
   ) {
     try {
-      return await api.get(url, { params });
+      return await getWithFilters<DrillResponse>(url, {
+        overrides,
+        extraParams: params,
+      });
     } catch (e: any) {
       return {
         data: {
@@ -2521,10 +2696,11 @@ useEffect(() => {
       };
     }
   }
+  }
   async function openCallRequestsDrill() {
     const res: any = await fetchSafe(
       "/reporting/drill/call-requests",
-      { ...filterParams, limit: 2000 }
+      { limit: 2000 }
     );
     setDrillTitle("Demandes d’appel – détail");
     const items: DrillItem[] = res?.data?.items || [];
@@ -2536,14 +2712,14 @@ useEffect(() => {
     setDrillRows(items);
     setDrillOpen(true);
   }
-  async function openCallsDrill() {
+ async function openCallsDrill() {
     const res: any = await fetchSafe(
       "/reporting/drill/calls",
-      { ...filterParams, limit: 2000 }
+      { limit: 2000 }
     );
     setDrillTitle("Appels passés – détail");
     const items: DrillItem[] = res?.data?.items || [];
-    if (res?.data?.__error)
+                                  if (res?.data?.__error)
       items.unshift({
         leadId: "**msg**",
         leadName: res.data.__error,
@@ -2557,7 +2733,6 @@ useEffect(() => {
       {
         answered: 1,
         limit: 2000,
-        ...filterParams,
       }
     );
 
@@ -2577,7 +2752,6 @@ useEffect(() => {
       {
         setterNoShow: 1,
         limit: 2000,
-        ...filterParams,
       }
     );
     setDrillTitle("No-show Setter – détail");
@@ -2590,42 +2764,6 @@ useEffect(() => {
     setDrillRows(items);
     setDrillOpen(true);
   }
-
-  const STAGE_SYNONYMS: Record<string, string[]> = {
-    RV0_CANCELED: ["RV0_CANCELED"],
-    RV1_CANCELED: ["RV1_CANCELED"],
-    RV2_CANCELED: ["RV2_CANCELED"],
-    RV0_NO_SHOW: ["RV0_NO_SHOW"],
-    RV1_NO_SHOW: ["RV1_NO_SHOW"],
-    RV2_NO_SHOW: ["RV2_NO_SHOW"],
-  };
-
-async function fetchStageSeriesAny(stage: string, params: any) {
-  const list = STAGE_SYNONYMS[stage] ?? [stage];
-  const results = await Promise.all(
-    list.map(s => api.get<MetricSeriesOut>("/metrics/stage-series", {
-      params: { ...params, stage: s },
-    }).catch((error) => {
-      if (isStageSeriesInvalidError(error, "/metrics/stage-series")) {
-        return handleStageSeriesInvalid();
-      }
-      return { data: null } as any;
-    }))
-  );
-  // fusionne les byDay (clé = YYYY-MM-DD)
-  const map = new Map<string, number>();
-  for (const r of results) {
-    const arr = r?.data?.byDay ?? [];
-    for (const it of arr) {
-      const k = (it?.day?.slice?.(0,10)) || new Date(it.day).toISOString().slice(0,10);
-      map.set(k, (map.get(k) ?? 0) + Number(it.count || 0));
-    }
-  }
-  const byDay = [...map.entries()].sort(([a],[b]) => a.localeCompare(b))
-    .map(([day, count]) => ({ day, count }));
-  const total = byDay.reduce((s,x)=>s+x.count,0);
-  return { total, byDay } as MetricSeriesOut;
-}
 
 type KpiTone = "primary" | "success" | "warning" | "danger" | "info" | "muted";
 
@@ -2669,12 +2807,14 @@ function KpiBox({
   const onFunnelCardClick = async (key: FunnelKey): Promise<void> => {
   switch (key) {
     case "leads": {
-     const res = await api.get("/reporting/drill/leads-received", {
-        params: {
+     const res = await getWithFilters<DrillResponse>(
+        "/reporting/drill/leads-received",
+        {
+        extraParams: {
           limit: 2000,
-          ...filterParams,
         },
-      });
+      }
+      );
       setDrillTitle("Leads reçus – détail");
       setDrillRows(res.data?.items || []);
       setDrillOpen(true);
@@ -2742,12 +2882,14 @@ function KpiBox({
       });
 
     case "wonCount": {
-      const res = await api.get("/reporting/drill/won", {
-        params: {
+      const res = await getWithFilters<DrillResponse>(
+        "/reporting/drill/won",
+        {
+        extraParams: {
           limit: 2000,
-          ...filterParams,
         },
-      });
+      }
+      );
       setDrillTitle("Ventes (WON) – détail");
       setDrillRows(res.data?.items || []);
       setDrillOpen(true);
@@ -2843,29 +2985,10 @@ function KpiBox({
                 <Clock />
               </div>
             </div>
-
-            {/* Sélecteur de fuseau horaire */}
-            <select
-              className="text-xs rounded-xl border border-white/10 bg-white/[0.03] px-2 py-1 focus:outline-none"
-              value={tz}
-              onChange={(e) => {
-                const nextTz = e.target.value;
-                setTz(nextTz);
-                syncFiltersToUrl({
-                  from: fromISO,
-                  to: toISO,
-                  tz: nextTz,
-                  setterIds,
-                  closerIds,
-                  tags,
-                });
-              }}
-              title="Fuseau horaire d’agrégation"
-            >
-              {TIMEZONES.map(z => (
-                <option key={z} value={z}>{z}</option>
-              ))}
-            </select>
+            <div className="hidden sm:flex items-center gap-1 text-xs text-[--muted]">
+              <span>Fuseau :</span>
+              <span className="font-medium text-slate-100">{tz}</span>
+            </div>
 
             <label className="hidden sm:flex items-center gap-2 text-xs">
               <input
@@ -2890,6 +3013,7 @@ function KpiBox({
                 setDraftTags([...tags]);
                 setDraftSources([...sources]);
                 setDraftExcludeSources([...excludeSources]);
+                setDraftTz(tz);
                 setFiltersOpen(true);
               }}
             >
@@ -4931,14 +5055,16 @@ function KpiBox({
                   type="button"
                   className="btn btn-primary"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-setters.pdf`, {
-                      params: filterParams,
-                      responseType: 'blob',
-                    });
+                    const res = await getWithFilters<Blob>(
+                      "/reporting/export/spotlight-closers.pdf",
+                      {
+                        config: { responseType: "blob" },
+                      }
+                    );
                     const url = URL.createObjectURL(res.data);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `spotlight_setters_${fromISO || 'from'}_${toISO || 'to'}.pdf`;
+                    a.download = `spotlight_closers_${fromISO || 'from'}_${toISO || 'to'}.pdf`;
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
@@ -4990,10 +5116,12 @@ function KpiBox({
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                   const res = await api.get(`/reporting/export/spotlight-closers.csv`, {
-                      params: filterParams,
-                      responseType: 'blob',
-                    });
+                   const res = await getWithFilters<Blob>(
+                      "/reporting/export/spotlight-closers.csv",
+                      {
+                        config: { responseType: "blob" },
+                      }
+                    );
                     const url = URL.createObjectURL(res.data);
                     const a = document.createElement('a');
                     a.href = url;
@@ -5155,10 +5283,26 @@ function KpiBox({
                     }
                   />
                 </div>
+                <div>
+                  <div className="label">Fuseau horaire</div>
+                  <select
+                    className="input"
+                    value={draftTz}
+                    onChange={(e) => setDraftTz(e.target.value)}
+                    title="Fuseau horaire d’agrégation"
+                  >
+                    {TIMEZONES.map((zone) => (
+                      <option key={zone} value={zone}>
+                        {zone}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <SourcesFilter
                   sources={draftSources}
                   excludeSources={draftExcludeSources}
+                  params={filterOptionsParams}
                   onSourcesChange={setDraftSources}
                   onExcludeSourcesChange={setDraftExcludeSources}
                 />
@@ -5242,12 +5386,12 @@ function KpiBox({
                 <div>
                   <div className="label">Tags</div>
                   <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
-                    {filterOptionsLoading ? (
+                    {filterOptionsLoading && availableTags.length === 0 ? (
                       <div className="text-xs text-[--muted]">
                         Chargement…
                       </div>
-                    ) : (filterOptions?.tags?.length ?? 0) > 0 ? (
-                      filterOptions?.tags.map((tag) => (
+                    ) : availableTags.length > 0 ? (
+                      availableTags.map((tag) => (
                         <label
                           key={`tag-${tag}`}
                           className="flex items-center gap-2 text-xs"
@@ -5305,9 +5449,10 @@ function KpiBox({
                     onClick={() => {
                       if (loading) return;
                       if (debugFilters) {
-                        console.info("[Filters] apply", {
+                         console.info("[Filters] apply", {
                           previousAppliedState: buildFilterState(range),
                           nextAppliedState: buildFilterState(draftRange, {
+                            tz: draftTz,
                             setterIds: draftSetterIds,
                             closerIds: draftCloserIds,
                             tags: draftTags,
@@ -5317,6 +5462,7 @@ function KpiBox({
                         });
                       }
                       setRange(draftRange);
+                      setTz(draftTz);
                       setSetterIds(draftSetterIds);
                       setCloserIds(draftCloserIds);
                       setTags(draftTags);
@@ -5329,10 +5475,12 @@ function KpiBox({
                         to: draftRange.to
                           ? toISODate(draftRange.to)
                           : undefined,
-                        tz,
+                        tz: draftTz,
                         setterIds: draftSetterIds,
                         closerIds: draftCloserIds,
                         tags: draftTags,
+                        sources: draftSources,
+                        excludeSources: draftExcludeSources,
                       });
                       setFiltersOpen(false);
                       if (debugFilters && typeof window !== "undefined") {
@@ -5368,6 +5516,7 @@ function KpiBox({
     </div>
   );
 }
+
 
 
 
