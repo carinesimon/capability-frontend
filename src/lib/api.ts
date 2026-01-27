@@ -34,6 +34,7 @@ function normalizeParams(params: unknown): Record<string, unknown> {
 function extractFilterParams(params: Record<string, unknown>) {
   const setterIds = params.setterIds ?? params.setterIdsCsv;
   const closerIds = params.closerIds ?? params.closerIdsCsv;
+  const tags = params.tags ?? params.tagsCsv;
   return {
     from: params.from,
     to: params.to,
@@ -42,7 +43,7 @@ function extractFilterParams(params: Record<string, unknown>) {
     closerIds,
     sourcesCsv: params.sourcesCsv,
     sourcesExcludeCsv: params.sourcesExcludeCsv,
-    tags: params.tags,
+    tags,
   };
 }
 
@@ -251,6 +252,7 @@ export async function moveLeadToBoardColumn(leadId: string, columnKey: string) {
   await api.post(apiPath(`/leads/${leadId}/board`), { columnKey });
 }
 export default api;
+
 
 
 
