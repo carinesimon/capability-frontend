@@ -1,5 +1,6 @@
 // src/hooks/useFunnelMetrics.ts
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import axios from "axios";
 import api from "@/lib/api";
 import type { ReportingFilterParams } from "@/lib/reportingFilters";
 
@@ -50,11 +51,27 @@ export function useFunnelMetrics(
   tz?: Timezone,
   filters?: ReportingFilterParams
 ) {
+  const debugFilters =
+    process.env.NEXT_PUBLIC_DEBUG_FILTERS === "true" &&
+    process.env.NODE_ENV !== "production";
   const [data, setData] = useState<FunnelTotals | Record<string, never>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const tagsUnsupportedRef = useRef(false);
   const fromTime = fromDate?.getTime();
   const toTime = toDate?.getTime();
+
+  const isTagsUnsupportedError = (err: unknown) => {
+    if (!axios.isAxiosError(err)) return false;
+    const status = err.response?.status ?? 0;
+    if (status !== 400 && status !== 422) return false;
+    const payload = err.response?.data;
+    const message =
+      typeof payload === "string"
+        ? payload
+        : (payload as { message?: string })?.message ?? "";
+    return message.toLowerCase().includes("tag");
+  };
 
   useEffect(() => {
     if (!fromTime || !toTime) return;
@@ -68,13 +85,50 @@ export function useFunnelMetrics(
         setLoading(true);
         setError(null);
 
- 
-    const res = await api.get<FunnelTotals>("/metrics/funnel", {
-          params: { ...(filters ?? {}), from, to, tz }, // ✅ on envoie le tz au backend␊
-        });
+        const allowTags = !tagsUnsupportedRef.current;
+        const params = {
+          ...(filters ?? {}),
+          from,
+          to,
+          tz,
+        };
+        if (!allowTags && params.tagsCsv) {
+          delete params.tagsCsv;
+        }
 
-        if (cancelled) return;
-        setData(res.data || {});
+        if (debugFilters) {
+          console.info("[Filters] request", {
+            url: "/metrics/funnel",
+            params,
+          });
+        }
+
+        try {
+          const res = await api.get<FunnelTotals>("/metrics/funnel", {
+            params,
+          });
+
+          if (cancelled) return;
+          setData(res.data || {});
+        } catch (e) {
+          if (allowTags && isTagsUnsupportedError(e) && params.tagsCsv) {
+            tagsUnsupportedRef.current = true;
+            if (debugFilters) {
+              console.info("[Filters] tags unsupported, retrying without tags", {
+                url: "/metrics/funnel",
+              });
+            }
+            const { tagsCsv: _tagsCsv, ...rest } = params;
+            void _tagsCsv;
+            const retry = await api.get<FunnelTotals>("/metrics/funnel", {
+              params: rest,
+            });
+            if (cancelled) return;
+            setData(retry.data || {});
+            return;
+          }
+          throw e;
+        }
       } catch (e) {
         if (cancelled) return;
         setError(e);
@@ -88,6 +142,7 @@ export function useFunnelMetrics(
     return () => {
       cancelled = true;
     };
-  }, [fromTime, toTime, tz, filters]); // ✅ tz dans les deps
+  }, [fromTime, toTime, tz, filters, debugFilters]); // ✅ tz dans les deps
   return { data, loading, error };
 }
+
