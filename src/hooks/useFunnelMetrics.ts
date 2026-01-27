@@ -1,6 +1,7 @@
 // src/hooks/useFunnelMetrics.ts
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
+import type { ReportingFilterParams } from "@/lib/reportingFilters";
 
 export type FunnelTotals = {
   LEADS_RECEIVED: number;
@@ -46,26 +47,30 @@ export type Timezone = string; // ex: 'Europe/Paris', 'Africa/Abidjan', ...
 export function useFunnelMetrics(
   fromDate?: Date | null,
   toDate?: Date | null,
-  tz?: Timezone
+  tz?: Timezone,
+  filters?: ReportingFilterParams
 ) {
   const [data, setData] = useState<FunnelTotals | Record<string, never>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const fromTime = fromDate?.getTime();
+  const toTime = toDate?.getTime();
 
   useEffect(() => {
-    if (!fromDate || !toDate) return;
+    if (!fromTime || !toTime) return;
 
     let cancelled = false;
-    const from = toISODate(fromDate);
-    const to = toISODate(toDate);
+    const from = toISODate(new Date(fromTime));
+    const to = toISODate(new Date(toTime));
 
     async function load() {
       try {
         setLoading(true);
         setError(null);
 
+ 
     const res = await api.get<FunnelTotals>("/metrics/funnel", {
-          params: { from, to, tz }, // ✅ on envoie le tz au backend␊
+          params: { ...(filters ?? {}), from, to, tz }, // ✅ on envoie le tz au backend␊
         });
 
         if (cancelled) return;
@@ -83,8 +88,6 @@ export function useFunnelMetrics(
     return () => {
       cancelled = true;
     };
-  }, [fromDate?.getTime(), toDate?.getTime(), tz]); // ✅ tz dans les deps
+  }, [fromTime, toTime, tz, filters]); // ✅ tz dans les deps
   return { data, loading, error };
 }
-
-
