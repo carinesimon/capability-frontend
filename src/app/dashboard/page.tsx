@@ -1,7 +1,7 @@
 "use client";
 
 import axios from "axios";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import { currentMonthRange } from "@/lib/date";
@@ -1316,10 +1316,10 @@ const funnelData: FunnelProps["data"] = {
   const [salesWeekly, setSalesWeekly] = useState<
     SalesWeeklyItem[]
   >([]);
-  const [ops, setOps] = useState<WeeklyOpsRow[]>([]);
+    const [ops, setOps] = useState<WeeklyOpsRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [stageSeriesWarning, setStageSeriesWarning] = useState<string | null>(null);
   const [duos, setDuos] = useState<DuoRow[]>([]);
-
   // Séries par jour : call requests / calls total / calls answered
   const [mCallReq, setMCallReq] =
     useState<MetricSeriesOut | null>(null);
@@ -1435,6 +1435,44 @@ const neutralKpiCell =
     return Array.from(new Set(tags));
   };
 
+  const stageSeriesWarningSent = useRef(false);
+  const emptyStageSeries: MetricSeriesOut = { total: 0, byDay: [] };
+
+  const extractErrorMessage = (error: unknown) => {
+    if (axios.isAxiosError(error)) {
+      const data = error.response?.data;
+      if (typeof data === "string") return data;
+      if (data && typeof data === "object") {
+        if (typeof (data as { message?: unknown }).message === "string") {
+          return (data as { message: string }).message;
+        }
+        if (typeof (data as { error?: unknown }).error === "string") {
+          return (data as { error: string }).error;
+        }
+      }
+    }
+    if (error instanceof Error) return error.message;
+    return "";
+  };
+
+  const isStageSeriesInvalidError = (error: unknown, url?: string) => {
+    if (!url?.includes("/metrics/stage-series")) return false;
+    if (!axios.isAxiosError(error)) return false;
+    if (error.response?.status !== 400) return false;
+    const message = extractErrorMessage(error).toLowerCase();
+    return message.includes("stage invalide") || message.includes("stage est requis");
+  };
+
+  const handleStageSeriesInvalid = () => {
+    if (!stageSeriesWarningSent.current) {
+      stageSeriesWarningSent.current = true;
+      setStageSeriesWarning(
+        "Certaines séries par stage sont indisponibles (stage invalide). Les graphiques restent stables."
+      );
+    }
+    return { data: emptyStageSeries } as { data: MetricSeriesOut };
+  };
+
   // Helper fetch "metric/*" safe
   async function fetchSafeMetric(
     url: string,
@@ -1444,10 +1482,14 @@ const neutralKpiCell =
       return await api.get<MetricSeriesOut>(url, {
         params,
       });
-    } catch {
+    } catch (error) {
+      if (isStageSeriesInvalidError(error, url)) {
+        return handleStageSeriesInvalid();
+      }
       return { data: null } as any;
     }
   }
+
 
   // Auth
   useEffect(() => {
@@ -1615,13 +1657,11 @@ const neutralKpiCell =
         }
 
         // 3) RV0 no-show par semaine, à partir de StageEvent(RV0_NO_SHOW) → /metrics/stage-series
-        const rv0SeriesRes = await api.get<MetricSeriesOut>("/metrics/stage-series", {
-          params: {
-            ...filterParams,
-            stage: "RV0_NO_SHOW",
-          },
+        const rv0SeriesRes = await fetchSafeMetric("/metrics/stage-series", {
+          ...filterParams,
+          stage: "RV0_NO_SHOW",
         });
-        const series = rv0SeriesRes.data?.byDay || [];
+        const series = rv0SeriesRes?.data?.byDay || [];
 
         // Helpers semaine (UTC, lundi → dimanche)
         function mondayLocal(d: Date) {
@@ -2466,22 +2506,25 @@ useEffect(() => {
   }
 
   const STAGE_SYNONYMS: Record<string, string[]> = {
-  RV0_CANCELED:  ["RV0_CANCELED",  "RV0_CANCELLED"],
-  RV1_CANCELED:  ["RV1_CANCELED",  "RV1_CANCELLED"],
-  RV2_CANCELED:  ["RV2_CANCELED",  "RV2_CANCELLED"],
-  RV0_NO_SHOW:   ["RV0_NO_SHOW"],  
-  RV1_NO_SHOW:   ["RV1_NO_SHOW"],   
-  RV2_NO_SHOW:   ["RV2_NO_SHOW"],  
-
-
-};
+    RV0_CANCELED: ["RV0_CANCELED"],
+    RV1_CANCELED: ["RV1_CANCELED"],
+    RV2_CANCELED: ["RV2_CANCELED"],
+    RV0_NO_SHOW: ["RV0_NO_SHOW"],
+    RV1_NO_SHOW: ["RV1_NO_SHOW"],
+    RV2_NO_SHOW: ["RV2_NO_SHOW"],
+  };
 
 async function fetchStageSeriesAny(stage: string, params: any) {
   const list = STAGE_SYNONYMS[stage] ?? [stage];
   const results = await Promise.all(
     list.map(s => api.get<MetricSeriesOut>("/metrics/stage-series", {
       params: { ...params, stage: s },
-    }).catch(() => ({ data: null } as any)))
+    }).catch((error) => {
+      if (isStageSeriesInvalidError(error, "/metrics/stage-series")) {
+        return handleStageSeriesInvalid();
+      }
+      return { data: null } as any;
+    }))
   );
   // fusionne les byDay (clé = YYYY-MM-DD)
   const map = new Map<string, number>();
@@ -2777,6 +2820,11 @@ function KpiBox({
           {err && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               {err}
+            </div>
+          )}
+          {stageSeriesWarning && (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200">
+              {stageSeriesWarning}
             </div>
           )}
 
@@ -5232,4 +5280,5 @@ function KpiBox({
     </div>
   );
 }
+
 
