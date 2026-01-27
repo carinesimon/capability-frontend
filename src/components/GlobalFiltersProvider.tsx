@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { serializeCsv } from "@/lib/globalSourcesFilters";
 
 export type GlobalFiltersContextValue = {
   sources: string[];
@@ -57,11 +58,11 @@ export default function GlobalFiltersProvider({
   );
 
   const sourcesCsv = useMemo(
-    () => (sources.length > 0 ? sources.join(",") : undefined),
+    () => serializeCsv(sources),
     [sources]
   );
   const sourcesExcludeCsv = useMemo(
-    () => (excludeSources.length > 0 ? excludeSources.join(",") : undefined),
+    () => serializeCsv(excludeSources),
     [excludeSources]
   );
 
