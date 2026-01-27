@@ -35,6 +35,13 @@ export function parseCsv(value: string | null): string[] {
 }
 
 export function serializeCsv(values: string[]): string | undefined {
-  if (!values.length) return undefined;
-  return values.join(",");
+  const normalized = Array.from(
+    new Set(
+      values
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+  if (!normalized.length) return undefined;
+  return normalized.join(",");
 }
