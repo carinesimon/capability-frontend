@@ -160,6 +160,7 @@ export const reportingApi = {  /** Tous ces endpoints acceptent maintenant le fu
    * [{ day, RV0_CANCELED, RV1_CANCELED, RV2_CANCELED, total }]
    * déjà fusionné, prêt pour Recharts.
    */
+
   canceledDaily: async (params: ReportingFilterParams) => {
     const [rv0, rv1, rv2] = await Promise.all([
       api.get<MetricSeriesOut>("/metrics/stage-series", {
