@@ -5055,7 +5055,7 @@ function KpiBox({
                   className="btn btn-primary"
                   onClick={async () => {
                     const res = await getWithFilters<Blob>(
-                      "/reporting/export/spotlight-closers.pdf",
+                      "/reporting/export/spotlight-setters.pdf",
                       {
                         config: { responseType: "blob" },
                       }
@@ -5063,7 +5063,7 @@ function KpiBox({
                     const url = URL.createObjectURL(res.data);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `spotlight_closers_${fromISO || 'from'}_${toISO || 'to'}.pdf`;
+                    a.download = `spotlight_setters_${fromISO || 'from'}_${toISO || 'to'}.pdf`;
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
@@ -5076,7 +5076,7 @@ function KpiBox({
                   className="btn btn-ghost"
                   onClick={async () => {
                    const res = await api.get(`/reporting/export/spotlight-setters.csv`, {
-                      params: filterParams,
+                      params: filterParamsKey,
                       responseType: 'blob',
                     });
                     const url = URL.createObjectURL(res.data);
@@ -5097,7 +5097,7 @@ function KpiBox({
                   className="btn btn-primary"
                   onClick={async () => {
                     const res = await api.get(`/reporting/export/spotlight-closers.pdf`, {
-                      params: filterParams,
+                      params: filterParamsKey,
                       responseType: 'blob',
                     });
                     const url = URL.createObjectURL(res.data);
@@ -5314,7 +5314,7 @@ function KpiBox({
 
                 <div>
                   <div className="label">Setters</div>
-                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">␊
+                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
                     {filterOptionsLoading ? (
                       <div className="text-xs text-[--muted]">
                         Chargement…
@@ -5349,7 +5349,7 @@ function KpiBox({
 
                 <div>
                   <div className="label">Closers</div>
-                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">␊
+                  <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
                     {filterOptionsLoading ? (
                       <div className="text-xs text-[--muted]">
                         Chargement…
@@ -5514,9 +5514,5 @@ function KpiBox({
       </AnimatePresence>
     </div>
   );
+  
 }
-
-
-
-
-
