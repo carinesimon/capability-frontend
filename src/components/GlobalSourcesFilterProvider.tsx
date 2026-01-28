@@ -10,9 +10,13 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { serializeCsv } from "@/lib/globalSourcesFilters";
+import {
+  parseCsv,
+  serializeCsv,
+  setGlobalSourcesFilters,
+} from "@/lib/globalSourcesFilters";
 
-export type GlobalFiltersContextValue = {
+export type GlobalSourcesFiltersContextValue = {
   sources: string[];
   excludeSources: string[];
   setSources: Dispatch<SetStateAction<string[]>>;
@@ -21,17 +25,8 @@ export type GlobalFiltersContextValue = {
   sourcesExcludeCsv?: string;
 };
 
-const GlobalFiltersContext = createContext<GlobalFiltersContextValue | null>(
-  null
-);
-
-function parseCsv(value: string | null): string[] {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
+const GlobalSourcesFiltersContext =
+  createContext<GlobalSourcesFiltersContextValue | null>(null);
 
 function arraysEqual(a: string[], b: string[]) {
   if (a.length !== b.length) return false;
@@ -41,7 +36,7 @@ function arraysEqual(a: string[], b: string[]) {
   return true;
 }
 
-export default function GlobalFiltersProvider({
+export default function GlobalSourcesFilterProvider({
   children,
 }: {
   children: ReactNode;
@@ -49,18 +44,15 @@ export default function GlobalFiltersProvider({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
-  const safePathname = pathname ?? "/";
   const safeSearchParams = useMemo(
     () => searchParams ?? new URLSearchParams(),
     [searchParams]
   );
-
+  const safePathname = pathname ?? "/";
   const [sources, setSources] = useState<string[]>(() =>
-    parseCsv(safeSearchParams.get("sourcesCsv"))
-  );
+    parseCsv(safeSearchParams.get("sourcesCsv")) );
   const [excludeSources, setExcludeSources] = useState<string[]>(() =>
-    parseCsv(safeSearchParams.get("sourcesExcludeCsv"))
-  );
+    parseCsv(safeSearchParams.get("sourcesExcludeCsv"))  );
 
   const sourcesCsv = useMemo(
     () => serializeCsv(sources),
@@ -82,6 +74,9 @@ export default function GlobalFiltersProvider({
       arraysEqual(prev, nextExclude) ? prev : nextExclude
     );
   }, [safeSearchParams]);
+  useEffect(() => {
+    setGlobalSourcesFilters({ sourcesCsv, sourcesExcludeCsv });
+  }, [sourcesCsv, sourcesExcludeCsv]);
 
   const updateUrl = useCallback(() => {
     const params = new URLSearchParams(safeSearchParams.toString());
@@ -99,7 +94,6 @@ export default function GlobalFiltersProvider({
 
     const nextQuery = params.toString();
     const currentQuery = safeSearchParams.toString();
-
     if (nextQuery === currentQuery) return;
     const url = nextQuery ? `${safePathname}?${nextQuery}` : safePathname;
     router.replace(url, { scroll: false });
@@ -110,7 +104,6 @@ export default function GlobalFiltersProvider({
     sourcesCsv,
     sourcesExcludeCsv,
   ]);
-
   useEffect(() => {
     updateUrl();
   }, [updateUrl]);
@@ -128,13 +121,13 @@ export default function GlobalFiltersProvider({
   );
 
   return (
-    <GlobalFiltersContext.Provider value={value}>
+    <GlobalSourcesFiltersContext.Provider value={value}>
       {children}
-    </GlobalFiltersContext.Provider>
+    </GlobalSourcesFiltersContext.Provider>
   );
 }
 
-export function useGlobalFilters() {
+export function useGlobalSourcesFilters() {
   const ctx = useContext(GlobalSourcesFiltersContext);
   if (!ctx) {
     throw new Error(
