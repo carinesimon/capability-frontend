@@ -3896,7 +3896,6 @@ function KpiBox({
               }
               return (() => {
                 const N = pipelineTotals;
-␊
                 const chip = (
                   label: string,
                   value: number | string,
@@ -6293,3 +6292,4 @@ function KpiBox({
   );
   
 }
+
