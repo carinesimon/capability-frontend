@@ -9,6 +9,8 @@ export type ReportingFilterState = {
   tags?: string[];
   sources?: string[];
   excludeSources?: string[];
+  leadCreatedFrom?: string;
+  leadCreatedTo?: string;
 };
 
 export type ReportingFilterParams = {
@@ -20,6 +22,8 @@ export type ReportingFilterParams = {
   tagsCsv?: string;
   sourcesCsv?: string;
   sourcesExcludeCsv?: string;
+  leadCreatedFrom?: string;
+  leadCreatedTo?: string;
 };
 
 export function buildReportingFilterParams(
@@ -34,6 +38,8 @@ export function buildReportingFilterParams(
     tagsCsv: serializeCsv(filters.tags ?? []),
     sourcesCsv: serializeCsv(filters.sources ?? []),
     sourcesExcludeCsv: serializeCsv(filters.excludeSources ?? []),
+    leadCreatedFrom: filters.leadCreatedFrom,
+    leadCreatedTo: filters.leadCreatedTo,
   };
 }
 
@@ -49,6 +55,10 @@ export function parseReportingFiltersFromSearchParams(
     tags: parseCsv(searchParams.get("tagsCsv")),
     sources: parseCsv(searchParams.get("sourcesCsv")),
     excludeSources: parseCsv(searchParams.get("sourcesExcludeCsv")),
+    leadCreatedFrom:
+      searchParams.get("leadCreatedFrom") ?? undefined,
+    leadCreatedTo:
+      searchParams.get("leadCreatedTo") ?? undefined,
   };
 }
 
@@ -74,6 +84,8 @@ export function updateSearchParamsWithReportingFilters(
   setParam("setterIdsCsv", params.setterIdsCsv);
   setParam("closerIdsCsv", params.closerIdsCsv);
   setParam("tagsCsv", params.tagsCsv);
+  setParam("leadCreatedFrom", params.leadCreatedFrom);
+  setParam("leadCreatedTo", params.leadCreatedTo);
 
   if (options.includeSources) {
     setParam("sourcesCsv", params.sourcesCsv);
