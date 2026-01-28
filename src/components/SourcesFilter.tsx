@@ -107,18 +107,11 @@ export default function SourcesFilter({
 
   useEffect(() => {
     let cancelled = false;
-
+    
     async function loadSources() {
       try {
         setLoading(true);
         setError(null);
-
-        const allowTags = !tagsUnsupportedRef.current;
-        const paramsWithTags = params ?? {};
-        const requestParams = { ...paramsWithTags };
-        if (!allowTags && requestParams.tagsCsv) {
-          delete requestParams.tagsCsv;
-        }
 
         if (debugFilters) {
           console.info("[Filters] request", {
@@ -126,140 +119,14 @@ export default function SourcesFilter({
             params: requestParams,
           });
         }
-        "use client";
 
-import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import axios from "axios";
-import api from "@/lib/api";
-import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
-import type { ReportingFilterParams } from "@/lib/reportingFilters";
-
-type SourceOptionMeta = {
-  count?: number;
-  lastSeenAt?: string;
-};
-
-type SourceOption = {
-  value: string;
-  label: string;
-  meta?: SourceOptionMeta;
-};
-
-type SourcePayload =
-  | string
-  | { source?: string; count?: number; lastSeenAt?: string };
-
-type SourcesResponse = SourcePayload[] | { sources?: SourcePayload[] };
-
-type Mode = "include" | "exclude";
-
-type SourcesFilterProps = {
-  className?: string;
-  sources?: string[];
-  excludeSources?: string[];
-  params?: ReportingFilterParams;
-  onSourcesChange?: Dispatch<SetStateAction<string[]>>;
-  onExcludeSourcesChange?: Dispatch<SetStateAction<string[]>>;
-};
-
-const noopSetter: Dispatch<SetStateAction<string[]>> = () => {};
-
-export default function SourcesFilter({
-  className,
-  sources: sourcesProp,
-  excludeSources: excludeSourcesProp,
-  params,
-  onSourcesChange,
-  onExcludeSourcesChange,
-}: SourcesFilterProps) {
-  const debugFilters =
-    process.env.NEXT_PUBLIC_DEBUG_FILTERS === "true" &&
-    process.env.NODE_ENV !== "production";
-  const globalFilters = useGlobalFilters();
-
-  const sources = sourcesProp ?? globalFilters?.sources ?? [];
-  const excludeSources = excludeSourcesProp ?? globalFilters?.excludeSources ?? [];
-
-  const setSources =
-    onSourcesChange ?? globalFilters?.setSources ?? noopSetter;
-  const setExcludeSources =
-    onExcludeSourcesChange ?? globalFilters?.setExcludeSources ?? noopSetter;
-
-  const [mode, setMode] = useState<Mode>("include");
-  const [query, setQuery] = useState("");
-  const [options, setOptions] = useState<SourceOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const tagsUnsupportedRef = useRef(false);
-
-  const normalizeOptions = (payload: SourcesResponse): SourceOption[] => {
-    const list = Array.isArray(payload) ? payload : payload?.sources ?? [];
-
-    const mapped = list
-      .map((entry): SourceOption | null => {
-        if (typeof entry === "string") {
-          const v = entry.trim();
-          if (!v) return null;
-          return { value: v, label: v };
-        }
-
-        if (entry && typeof entry === "object") {
-          const source = entry.source?.trim();
-          if (!source) return null;
-          return {
-            value: source,
-            label: source,
-            meta: {
-              count: entry.count,
-              lastSeenAt: entry.lastSeenAt,
-            },
-          };
-        }
-
-        return null;
-      })
-      .filter((entry): entry is SourceOption => entry !== null);
-
-    const seen = new Set<string>();
-    const unique = mapped.filter((entry) => {
-      const key = entry.value;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    unique.sort((a, b) => a.label.localeCompare(b.label, "fr"));
-    return unique;
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadSources() {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const res = await api.get<SourcesResponse>("/reporting/sources");
+        const res = await api.get<SourcesResponse>("/reporting/sources", {
+          params: requestParams,
+        });
         if (cancelled) return;
-        const allowTags = !tagsUnsupportedRef.current;
-        const paramsWithTags = params ?? {};
-        const requestParams = { ...paramsWithTags };
-        if (!allowTags && requestParams.tagsCsv) {
-          delete requestParams.tagsCsv;
-        }
-
-        if (debugFilters) {
-          console.info("[Filters] request", {
-            url: "/reporting/sources",
-            params: requestParams,
-          });
-        }
 
         setOptions(normalizeOptions(res.data));
-      } catch (e) {
+      } catch {
         try {
           const res = await api.get<SourcesResponse>("/reporting/sources", {
             params: requestParams,
@@ -295,13 +162,12 @@ export default function SourcesFilter({
             if (cancelled) return;
             setOptions(normalizeOptions(res.data));
           } else {
-            throw error;
+            if (!cancelled) {
+              setError("Impossible de charger les sources pour le moment.");
+            }
           }
         }
-      } catch {
-        if (!cancelled) {
-          setError("Impossible de charger les sources pour le moment.");
-        }
+    
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -313,7 +179,6 @@ export default function SourcesFilter({
       cancelled = true;
     };
     }, [debugFilters, params]);
-
   const active = mode === "include" ? sources : excludeSources;
   const setActive = mode === "include" ? setSources : setExcludeSources;
 
