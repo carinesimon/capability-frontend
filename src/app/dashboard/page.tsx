@@ -1104,14 +1104,19 @@ export default function DashboardPage() {
     process.env.NODE_ENV !== "production";
   const router = useRouter();
   const pathname = usePathname();
+  const safePathname = pathname ?? "/";
   const search = useSearchParams();
+  const safeSearch = useMemo(
+    () => search ?? new URLSearchParams(),
+    [search]
+  );
   const {
     sources,
     excludeSources,
     setSources,
     setExcludeSources,
   } = useGlobalFilters();
-  const view = (search.get("view") || "home") as
+  const view = (safeSearch.get("view") || "home") as
     | "home"
     | "closers"
     | "setters"
@@ -1126,9 +1131,9 @@ export default function DashboardPage() {
   const initialFilters = useMemo(
     () =>
       parseReportingFiltersFromSearchParams(
-        new URLSearchParams(search.toString())
+        new URLSearchParams(safeSearch.toString())
       ),
-    [search]
+    [safeSearch]
   );
   const [range, setRange] = useState<Range>(() => ({
     from: initialFilters.from
@@ -1392,14 +1397,14 @@ export default function DashboardPage() {
     excludeSources?: string[];
   }) => {
     const nextParams = updateSearchParamsWithReportingFilters(
-      new URLSearchParams(search.toString()),
+      new URLSearchParams(safeSearch.toString()),
       nextFilters,
       { includeSources: true }
     );
     const nextQuery = nextParams.toString();
-    const currentQuery = search.toString();
+    const currentQuery = safeSearch.toString();
     if (nextQuery === currentQuery) return;
-    const url = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    const url = nextQuery ? `${safePathname}?${nextQuery}` : safePathname;
     router.replace(url, { scroll: false });
   };
 
@@ -5516,3 +5521,4 @@ function KpiBox({
   );
   
 }
+
