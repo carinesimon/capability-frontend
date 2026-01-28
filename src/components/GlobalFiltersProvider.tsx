@@ -134,11 +134,11 @@ export default function GlobalFiltersProvider({
   );
 }
 
-export function useGlobalFilters() {
-  const ctx = useContext(GlobalSourcesFiltersContext);
+export function useGlobalFilters(): GlobalFiltersContextValue {
+  const ctx = useContext(GlobalFiltersContext);
   if (!ctx) {
     throw new Error(
-      "useGlobalSourcesFilters must be used within GlobalSourcesFilterProvider"
+      "useGlobalFilters must be used within GlobalFiltersProvider"
     );
   }
   return ctx;
