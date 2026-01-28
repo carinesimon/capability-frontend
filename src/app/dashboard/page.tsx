@@ -305,6 +305,14 @@ function toISODate(d: Date | string) {
   const day = String(dd.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+function deriveLeadCreatedMode(
+  from?: string,
+  to?: string
+): "none" | "exact" | "range" {
+  if (!from && !to) return "none";
+  if (from && to && from === to) return "exact";
+  return "range";
+}
 const fmtInt = (n: number) => Math.round(n).toLocaleString("fr-FR");
 const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
 const fmtPct = (num?: number | null, den?: number | null) =>
@@ -1172,6 +1180,12 @@ export default function DashboardPage() {
   const [tags, setTags] = useState<string[]>(
     () => initialFilters.tags ?? []
   );
+  const [leadCreatedFrom, setLeadCreatedFrom] = useState<
+    string | undefined
+  >(() => initialFilters.leadCreatedFrom);
+  const [leadCreatedTo, setLeadCreatedTo] = useState<
+    string | undefined
+  >(() => initialFilters.leadCreatedTo);
   const [draftSetterIds, setDraftSetterIds] = useState<string[]>(
     () => initialFilters.setterIds ?? []
   );
@@ -1180,6 +1194,20 @@ export default function DashboardPage() {
   );
   const [draftTags, setDraftTags] = useState<string[]>(
     () => initialFilters.tags ?? []
+  );
+  const [draftLeadCreatedFrom, setDraftLeadCreatedFrom] = useState<
+    string | undefined
+  >(() => initialFilters.leadCreatedFrom);
+  const [draftLeadCreatedTo, setDraftLeadCreatedTo] = useState<
+    string | undefined
+  >(() => initialFilters.leadCreatedTo);
+  const [draftLeadCreatedMode, setDraftLeadCreatedMode] = useState<
+    "none" | "exact" | "range"
+  >(() =>
+    deriveLeadCreatedMode(
+      initialFilters.leadCreatedFrom,
+      initialFilters.leadCreatedTo
+    )
   );
   const [draftSources, setDraftSources] = useState<string[]>(
     () => sources
@@ -1197,6 +1225,8 @@ export default function DashboardPage() {
       setterIds: string[];
       closerIds: string[];
       tags: string[];
+      leadCreatedFrom?: string;
+      leadCreatedTo?: string;
     }> = {}
   ) => ({
     from: stateRange.from ? toISODate(stateRange.from) : undefined,
@@ -1207,6 +1237,9 @@ export default function DashboardPage() {
     setterIds: overrides.setterIds ?? setterIds,
     closerIds: overrides.closerIds ?? closerIds,
     tags: overrides.tags ?? tags,
+    leadCreatedFrom:
+      overrides.leadCreatedFrom ?? leadCreatedFrom,
+    leadCreatedTo: overrides.leadCreatedTo ?? leadCreatedTo,
   });
 
 
@@ -1270,6 +1303,8 @@ export default function DashboardPage() {
       tags: normalizedTags,
       sources: normalizedSources,
       excludeSources: normalizedExcludeSources,
+      leadCreatedFrom,
+      leadCreatedTo,
     }),
     [
       fromISO,
@@ -1280,6 +1315,8 @@ export default function DashboardPage() {
       normalizedTags,
       normalizedSources,
       normalizedExcludeSources,
+      leadCreatedFrom,
+      leadCreatedTo,
     ]
   );
   const buildParams = useCallback(
@@ -1309,6 +1346,8 @@ export default function DashboardPage() {
         tags: normalizedTagsKey,
         sources: normalizedSourcesKey,
         excludeSources: normalizedExcludeSourcesKey,
+        leadCreatedFrom,
+        leadCreatedTo,
       }),
     [
       fromISO,
@@ -1319,6 +1358,8 @@ export default function DashboardPage() {
       normalizedTagsKey,
       normalizedSourcesKey,
       normalizedExcludeSourcesKey,
+      leadCreatedFrom,
+      leadCreatedTo,
     ]
   );
   const filterOptionsParams = useMemo(
@@ -1374,6 +1415,12 @@ export default function DashboardPage() {
     if (!arraysEqual(tags, initialFilters.tags ?? [])) {
       setTags(initialFilters.tags ?? []);
     }
+    if (initialFilters.leadCreatedFrom !== leadCreatedFrom) {
+      setLeadCreatedFrom(initialFilters.leadCreatedFrom);
+    }
+    if (initialFilters.leadCreatedTo !== leadCreatedTo) {
+      setLeadCreatedTo(initialFilters.leadCreatedTo);
+    }
   }, [
     initialFilters,
     defaultFrom,
@@ -1383,6 +1430,8 @@ export default function DashboardPage() {
     setterIds,
     closerIds,
     tags,
+    leadCreatedFrom,
+    leadCreatedTo,
     tz,
   ]);
 
@@ -1395,6 +1444,8 @@ export default function DashboardPage() {
     tags?: string[];
     sources?: string[];
     excludeSources?: string[];
+    leadCreatedFrom?: string;
+    leadCreatedTo?: string;
   }) => {
     const nextParams = updateSearchParamsWithReportingFilters(
       new URLSearchParams(safeSearch.toString()),
@@ -1617,9 +1668,225 @@ const neutralKpiCell =
       ]),
     [filterOptions?.tags, tagsOptions]
   );
+  const setterNameMap = useMemo(
+    () =>
+      new Map(
+        (filterOptions?.setters ?? []).map((setter) => [
+          setter.id,
+          formatFilterUser(setter),
+        ])
+      ),
+    [filterOptions?.setters]
+  );
+  const closerNameMap = useMemo(
+    () =>
+      new Map(
+        (filterOptions?.closers ?? []).map((closer) => [
+          closer.id,
+          formatFilterUser(closer),
+        ])
+      ),
+    [filterOptions?.closers]
+  );
+  const isCloserFocus = normalizedCloserIds.length > 0;
+  const isSetterFocus = !isCloserFocus && normalizedSetterIds.length > 0;
+  const focusedCloserNames = useMemo(
+    () =>
+      normalizedCloserIds.map(
+        (id) => closerNameMap.get(id) ?? id
+      ),
+    [normalizedCloserIds, closerNameMap]
+  );
+  const focusedSetterNames = useMemo(
+    () =>
+      normalizedSetterIds.map(
+        (id) => setterNameMap.get(id) ?? id
+      ),
+    [normalizedSetterIds, setterNameMap]
+  );
+  const sourcesLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (normalizedSources.length > 0) {
+      parts.push(`Sources: ${normalizedSources.join(", ")}`);
+    }
+    if (normalizedExcludeSources.length > 0) {
+      parts.push(
+        `Sources exclues: ${normalizedExcludeSources.join(", ")}`
+      );
+    }
+    return parts.join(" · ");
+  }, [normalizedSources, normalizedExcludeSources]);
+  const tagsLabel = useMemo(
+    () =>
+      normalizedTags.length > 0
+        ? `Tags: ${normalizedTags.join(", ")}`
+        : "",
+    [normalizedTags]
+  );
+  const leadCreatedLabel = useMemo(() => {
+    if (!leadCreatedFrom && !leadCreatedTo) return "";
+    if (leadCreatedFrom && leadCreatedTo && leadCreatedFrom === leadCreatedTo) {
+      return `Créé le ${leadCreatedFrom}`;
+    }
+    return `Créé du ${leadCreatedFrom ?? "—"} au ${leadCreatedTo ?? "—"}`;
+  }, [leadCreatedFrom, leadCreatedTo]);
+  const focusLabel = useMemo(() => {
+    if (isCloserFocus) {
+      return `Vue filtrée : Closer = ${focusedCloserNames.join(", ")}`;
+    }
+    if (isSetterFocus) {
+      return `Vue filtrée : Setter = ${focusedSetterNames.join(", ")}`;
+    }
+    return "";
+  }, [focusedCloserNames, focusedSetterNames, isCloserFocus, isSetterFocus]);
+  const focusScopeSuffix = useMemo(() => {
+    if (isCloserFocus) {
+      return ` (Closer ${focusedCloserNames.join(", ")})`;
+    }
+    if (isSetterFocus) {
+      return ` (Setter ${focusedSetterNames.join(", ")})`;
+    }
+    return "";
+  }, [focusedCloserNames, focusedSetterNames, isCloserFocus, isSetterFocus]);
+  const focusedCloserLabel = useMemo(
+    () => focusedCloserNames.join(", "),
+    [focusedCloserNames]
+  );
+  const focusedSetterLabel = useMemo(
+    () => focusedSetterNames.join(", "),
+    [focusedSetterNames]
+  );
+  const focusedCloserNotTopLabel = useMemo(() => {
+    if (!focusedCloserLabel) return "";
+    const verb = focusedCloserNames.length > 1 ? "ne sont pas" : "n’est pas";
+    return `${focusedCloserLabel} ${verb} #1 actuellement`;
+  }, [focusedCloserLabel, focusedCloserNames.length]);
+  const focusedSetterNotTopLabel = useMemo(() => {
+    if (!focusedSetterLabel) return "";
+    const verb = focusedSetterNames.length > 1 ? "ne sont pas" : "n’est pas";
+    return `${focusedSetterLabel} ${verb} #1 actuellement`;
+  }, [focusedSetterLabel, focusedSetterNames.length]);
+  const focusedDuoNotTopLabel = useMemo(() => {
+    if (isCloserFocus && focusedCloserLabel) {
+      const verb =
+        focusedCloserNames.length > 1 ? "ne sont pas" : "n’est pas";
+      return `${focusedCloserLabel} ${verb} #1 actuellement`;
+    }
+    if (isSetterFocus && focusedSetterLabel) {
+      const verb =
+        focusedSetterNames.length > 1 ? "ne sont pas" : "n’est pas";
+      return `${focusedSetterLabel} ${verb} #1 actuellement`;
+    }
+    return "";
+  }, [
+    focusedCloserLabel,
+    focusedCloserNames.length,
+    focusedSetterLabel,
+    focusedSetterNames.length,
+    isCloserFocus,
+    isSetterFocus,
+  ]);
+  const focusLabelWithExtras = useMemo(() => {
+    if (!focusLabel) return "";
+    const extras = [sourcesLabel, tagsLabel, leadCreatedLabel]
+      .filter(Boolean)
+      .join(" · ");
+    return extras ? `${focusLabel} · ${extras}` : focusLabel;
+  }, [focusLabel, leadCreatedLabel, sourcesLabel, tagsLabel]);
+  const activeFiltersSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (isCloserFocus) {
+      parts.push(`Closer: ${focusedCloserNames.join(", ")}`);
+    } else if (isSetterFocus) {
+      parts.push(`Setter: ${focusedSetterNames.join(", ")}`);
+    }
+    if (sourcesLabel) parts.push(sourcesLabel);
+    if (tagsLabel) parts.push(tagsLabel);
+    if (leadCreatedLabel) parts.push(leadCreatedLabel);
+    return parts.join(" · ");
+  }, [
+    focusedCloserNames,
+    focusedSetterNames,
+    isCloserFocus,
+    isSetterFocus,
+    leadCreatedLabel,
+    sourcesLabel,
+    tagsLabel,
+  ]);
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string }> = [];
+    if (isCloserFocus) {
+      chips.push({
+        key: "closer",
+        label: `Closer: ${focusedCloserNames.join(", ")}`,
+      });
+    } else if (isSetterFocus) {
+      chips.push({
+        key: "setter",
+        label: `Setter: ${focusedSetterNames.join(", ")}`,
+      });
+    }
+    if (sourcesLabel) {
+      chips.push({ key: "sources", label: sourcesLabel });
+    }
+    if (tagsLabel) {
+      chips.push({ key: "tags", label: tagsLabel });
+    }
+    if (leadCreatedLabel) {
+      chips.push({
+        key: "leadCreated",
+        label: leadCreatedLabel,
+      });
+    }
+    return chips;
+  }, [
+    focusedCloserNames,
+    focusedSetterNames,
+    isCloserFocus,
+    isSetterFocus,
+    leadCreatedLabel,
+    sourcesLabel,
+    tagsLabel,
+  ]);
 
   const stageSeriesWarningSent = useRef(false);
   const tagsUnsupportedEndpointsRef = useRef<Set<string>>(new Set());
+  const clearFilters = useCallback(() => {
+    setSetterIds([]);
+    setCloserIds([]);
+    setTags([]);
+    setLeadCreatedFrom(undefined);
+    setLeadCreatedTo(undefined);
+    setDraftSetterIds([]);
+    setDraftCloserIds([]);
+    setDraftTags([]);
+    setDraftLeadCreatedFrom(undefined);
+    setDraftLeadCreatedTo(undefined);
+    setDraftLeadCreatedMode("none");
+    setSources([]);
+    setExcludeSources([]);
+    setDraftSources([]);
+    setDraftExcludeSources([]);
+    syncFiltersToUrl({
+      from: range.from ? toISODate(range.from) : undefined,
+      to: range.to ? toISODate(range.to) : undefined,
+      tz,
+      setterIds: [],
+      closerIds: [],
+      tags: [],
+      sources: [],
+      excludeSources: [],
+      leadCreatedFrom: undefined,
+      leadCreatedTo: undefined,
+    });
+  }, [
+    range.from,
+    range.to,
+    setExcludeSources,
+    setSources,
+    syncFiltersToUrl,
+    tz,
+  ]);
 
   const handleStageSeriesInvalid = useCallback(() => {
     if (!stageSeriesWarningSent.current) {
@@ -2436,6 +2703,51 @@ useEffect(() => {
       );
     });
   }, [closersWithRates]);
+  const visibleClosers = useMemo(
+    () =>
+      isCloserFocus
+        ? sortedClosers.filter((closer) =>
+            normalizedCloserIds.includes(closer.userId)
+          )
+        : sortedClosers.slice(0, 8),
+    [isCloserFocus, normalizedCloserIds, sortedClosers]
+  );
+  const visibleSetters = useMemo(
+    () =>
+      isSetterFocus
+        ? sortedSetters.filter((setter) =>
+            normalizedSetterIds.includes(setter.userId)
+          )
+        : sortedSetters.slice(0, 8),
+    [isSetterFocus, normalizedSetterIds, sortedSetters]
+  );
+  const topCloser = sortedClosers[0];
+  const topSetter = sortedSetters[0];
+  const topDuo = duos[0];
+  const isFocusedCloserTop =
+    isCloserFocus &&
+    topCloser &&
+    normalizedCloserIds.includes(topCloser.userId);
+  const isFocusedSetterTop =
+    isSetterFocus &&
+    topSetter &&
+    normalizedSetterIds.includes(topSetter.userId);
+  const isFocusedDuoTop = useMemo(() => {
+    if (!topDuo) return false;
+    if (isCloserFocus) {
+      return normalizedCloserIds.includes(topDuo.closerId);
+    }
+    if (isSetterFocus) {
+      return normalizedSetterIds.includes(topDuo.setterId);
+    }
+    return false;
+  }, [
+    isCloserFocus,
+    isSetterFocus,
+    normalizedCloserIds,
+    normalizedSetterIds,
+    topDuo,
+  ]);
 
   // ================== KPIs (avec fallback robuste) ==================
   const normalizedTotals = useMemo(
@@ -2975,6 +3287,14 @@ function KpiBox({
                 Période : <b>{fromISO ?? "—"}</b> →{" "}
                 <b>{toISO ?? "—"}</b>
               </div>
+              {focusLabelWithExtras && (
+                <div className="text-xs text-emerald-200/80 mt-1">
+                  {focusLabelWithExtras}
+                </div>
+              )}
+              <div className="text-[10px] text-[--muted] mt-1">
+                Filtres actifs: {activeFiltersSummary || "aucun"}
+              </div>
             </div>
           </div>
 
@@ -3002,6 +3322,31 @@ function KpiBox({
               />
               Comparer période précédente
             </label>
+            {activeFilterChips.length > 0 && (
+              <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
+                <span className="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] text-white/80">
+                  {activeFilterChips.length} filtres
+                </span>
+                <div className="flex flex-wrap gap-1 max-w-[340px]">
+                  {activeFilterChips.map((chip) => (
+                    <span
+                      key={chip.key}
+                      className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/80 truncate"
+                      title={chip.label}
+                    >
+                      {chip.label}
+                    </span>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={clearFilters}
+                >
+                  Effacer filtres
+                </button>
+              </div>
+            )}
             <button
               type="button"
               className="btn btn-ghost"
@@ -3015,6 +3360,14 @@ function KpiBox({
                 setDraftSetterIds([...setterIds]);
                 setDraftCloserIds([...closerIds]);
                 setDraftTags([...tags]);
+                setDraftLeadCreatedFrom(leadCreatedFrom);
+                setDraftLeadCreatedTo(leadCreatedTo);
+                setDraftLeadCreatedMode(
+                  deriveLeadCreatedMode(
+                    leadCreatedFrom,
+                    leadCreatedTo
+                  )
+                );
                 setDraftSources([...sources]);
                 setDraftExcludeSources([...excludeSources]);
                 setDraftTz(tz);
@@ -3050,7 +3403,7 @@ function KpiBox({
               className="card"
             >
               <div className="text-xs uppercase tracking-wide text-[--muted]">
-                Chiffre d’affaires gagné
+                Chiffre d’affaires gagné{focusScopeSuffix}
               </div>
               <div className="mt-2 text-2xl font-semibold">
                 {fmtEUR(kpiRevenue)}{" "}
@@ -3098,7 +3451,7 @@ function KpiBox({
                 onClick={() => onFunnelCardClick("wonCount")}
               >
                 <div className="text-xs uppercase tracking-wide text-[--muted]">
-                  Ventes
+                  Ventes{focusScopeSuffix}
                 </div>
                 <div className="mt-2 text-2xl font-semibold">
                   {fmtInt(kpiSales)}{" "}
@@ -3124,7 +3477,7 @@ function KpiBox({
               }
             >
               <div className="text-xs uppercase tracking-wide text-[--muted]">
-                RV1 Fait
+                RV1 faits{focusScopeSuffix}
               </div>
               <div className="mt-2 text-2xl font-semibold">
                 {fmtInt(kpiRv1Honored) } 
@@ -4417,33 +4770,44 @@ function KpiBox({
                   </div>
                 </div>
                 <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-                  {sortedClosers[0] ? (
-                    <div className="flex items-center gap-3">
-                      <div className="text-2xl leading-none">
-                        🥇
-                      </div>
-                      <div className="min-w-0">
-                        <div className="font-medium truncate">
-                          {sortedClosers[0].name}
+                  {topCloser ? (
+                    isCloserFocus && !isFocusedCloserTop ? (
+                      <div className="text-sm text-[--muted] space-y-1">
+                        <div className="font-medium text-white/80">
+                          {focusedCloserNotTopLabel}
                         </div>
-                        <div className="text-xs text-[--muted] truncate">
-                          {sortedClosers[0].email}
+                        <div className="text-xs text-[--muted]">
+                          #1 actuel: {topCloser.name}
                         </div>
                       </div>
-                      <div className="ml-auto text-right">
-                        <div className="text-lg font-semibold">
-                          {Math.round(
-                            (sortedClosers[0]
-                              .closingRate || 0) * 100
-                          )}
-                          %
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <div className="text-2xl leading-none">
+                          🥇
                         </div>
-                        <div className="text-[10px] text-[--muted]">
-                          {sortedClosers[0].salesClosed} ventes •{" "}
-                          {sortedClosers[0].rv1Honored} RV1 Fait
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">
+                            {topCloser.name}
+                          </div>
+                          <div className="text-xs text-[--muted] truncate">
+                            {topCloser.email}
+                          </div>
+                        </div>
+                        <div className="ml-auto text-right">
+                          <div className="text-lg font-semibold">
+                            {Math.round(
+                              (topCloser.closingRate || 0) *
+                                100
+                            )}
+                            %
+                          </div>
+                          <div className="text-[10px] text-[--muted]">
+                            {topCloser.salesClosed} ventes •{" "}
+                            {topCloser.rv1Honored} RV1 Fait
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )
                   ) : (
                     <div className="text-sm text-[--muted]">
                       — Aucune donnée
@@ -4472,40 +4836,45 @@ function KpiBox({
                   </div>
                 </div>
                 <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-                  {sortedSetters[0] ? (
-                    <div className="flex items-center gap-3">
-                      <div className="text-2xl leading-none">
-                        🥇
-                      </div>
-                      <div className="min-w-0">
-                        <div className="font-medium truncate">
-                          {sortedSetters[0].name}
+                 {topSetter ? (
+                    isSetterFocus && !isFocusedSetterTop ? (
+                      <div className="text-sm text-[--muted] space-y-1">
+                        <div className="font-medium text-white/80">
+                          {focusedSetterNotTopLabel}
                         </div>
-                        <div className="text-[10px] text-[--muted] truncate">
-                          {sortedSetters[0].email}
+                        <div className="text-xs text-[--muted]">
+                          #1 actuel: {topSetter.name}
                         </div>
                       </div>
-                      <div className="ml-auto text-right">
-                        <div className="text-lg font-semibold">
-                          {
-                            sortedSetters[0]
-                              .rv1PlannedOnHisLeads
-                          }{" "}
-                          RV1
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <div className="text-2xl leading-none">
+                          🥇
                         </div>
-                        <div className="text-[10px] text-[--muted]">
-                          {Math.round(
-                            (sortedSetters[0]
-                              .qualificationRate || 0) *
-                              100
-                          )}
-                          % qualif •{" "}
-                          {sortedSetters[0]
-                            .leadsReceived}{" "}
-                          leads
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">
+                            {topSetter.name}
+                          </div>
+                          <div className="text-[10px] text-[--muted] truncate">
+                            {topSetter.email}
+                          </div>
+                        </div>
+                        <div className="ml-auto text-right">
+                          <div className="text-lg font-semibold">
+                            {topSetter.rv1PlannedOnHisLeads}{" "}
+                            RV1
+                          </div>
+                          <div className="text-[10px] text-[--muted]">
+                            {Math.round(
+                              (topSetter.qualificationRate || 0) *
+                                100
+                            )}
+                            % qualif • {topSetter.leadsReceived}{" "}
+                            leads
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )
                   ) : (
                     <div className="text-sm text-[--muted]">
                       — Aucune donnée
@@ -4534,41 +4903,52 @@ function KpiBox({
                   </div>
                 </div>
                 <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-                  {duos?.[0] ? (
-                    <div className="grid grid-cols-2 gap-3 items-center">
-                      <div className="min-w-0">
+                  {topDuo ? (
+                    (isCloserFocus || isSetterFocus) && !isFocusedDuoTop ? (
+                      <div className="text-sm text-[--muted] space-y-1">
+                        <div className="font-medium text-white/80">
+                          {focusedDuoNotTopLabel}
+                        </div>
                         <div className="text-xs text-[--muted]">
-                          Setter
-                        </div>
-                        <div className="font-medium truncate">
-                          {duos[0].setterName}
-                        </div>
-                        <div className="text-[10px] text-[--muted] truncate">
-                          {duos[0].setterEmail}
+                          #1 actuel: {topDuo.setterName} ×{" "}
+                          {topDuo.closerName}
                         </div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-[--muted]">
-                          Closer
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 items-center">
+                        <div className="min-w-0">
+                          <div className="text-xs text-[--muted]">
+                            Setter
+                          </div>
+                          <div className="font-medium truncate">
+                            {topDuo.setterName}
+                          </div>
+                          <div className="text-[10px] text-[--muted] truncate">
+                            {topDuo.setterEmail}
+                          </div>
                         </div>
-                        <div className="font-medium truncate">
-                          {duos[0].closerName}
+                        <div className="min-w-0">
+                          <div className="text-xs text-[--muted]">
+                            Closer
+                          </div>
+                          <div className="font-medium truncate">
+                            {topDuo.closerName}
+                          </div>
+                          <div className="text-[10px] text-[--muted] truncate">
+                            {topDuo.closerEmail}
+                          </div>
                         </div>
-                        <div className="text-[10px] text-[--muted] truncate">
-                          {duos[0].closerEmail}
+                        <div className="col-span-2 flex items-center justify-between">
+                          <div className="text-lg font-semibold">
+                            {fmtEUR(topDuo.revenue)}
+                          </div>
+                          <div className="text-[10px] text-[--muted]">
+                            {topDuo.salesCount} ventes • RV1{" "}
+                            {topDuo.rv1Honored}/{topDuo.rv1Planned}
+                          </div>
                         </div>
                       </div>
-                      <div className="col-span-2 flex items-center justify-between">
-                        <div className="text-lg font-semibold">
-                          {fmtEUR(duos[0].revenue)}
-                        </div>
-                        <div className="text-[10px] text-[--muted]">
-                          {duos[0].salesCount} ventes • RV1{" "}
-                          {duos[0].rv1Honored}/
-                          {duos[0].rv1Planned}
-                        </div>
-                      </div>
-                    </div>
+                    )
                   ) : (
                     <div className="text-sm text-[--muted]">
                       — Aucune donnée
@@ -4581,28 +4961,31 @@ function KpiBox({
            {/* Spotlight tables */}
         <div className="mt-6 grid grid-cols-1 gap-5">
           {/* Team Closers */}
-          <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,.22),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
-                  👥 Team Closers
+          {!isSetterFocus && (
+            <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,.22),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-[--muted]">
+                    👥 Team Closers
+                  </div>
+                  <div className="text-xs text-[--muted] mt-0.5">
+                    {isCloserFocus
+                      ? "Vue ciblée · closers sélectionnés"
+                      : "Top 8 closers · vue synthétique : RV1 / RV2 · no-show · annulation · contrats · ventes"}
+                  </div>
                 </div>
-                <div className="text-xs text-[--muted] mt-0.5">
-                  Top 8 closers · vue synthétique : RV1 / RV2 · no-show · annulation · contrats · ventes
+                <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> KPI fort
+                  <span className="inline-flex h-2 w-2 rounded-full bg-amber-400/70" /> à surveiller
+                  <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> critique
                 </div>
               </div>
-              <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
-                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" /> KPI fort
-                <span className="inline-flex h-2 w-2 rounded-full bg-amber-400/70" /> à surveiller
-                <span className="inline-flex h-2 w-2 rounded-full bg-red-400/70" /> critique
-              </div>
-            </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1500px]">
-                <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
-                  <tr>
-                    <th className="py-2.5 px-3 font-medium">Closer</th>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[1500px]">
+                  <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3 font-medium">Closer</th>
 
                     {/* RV1 */}
                     <th className="py-2.5 px-3 font-medium text-right">RV1 planifiés</th>
@@ -4634,8 +5017,8 @@ function KpiBox({
                   </tr>
                 </thead>
 
-                <tbody>
-                  {sortedClosers.slice(0, 8).map((c, i) => (
+                <tbody>␊
+                  {visibleClosers.map((c, i) => (
                     <tr
                       key={c.userId}
                       className="border-t border-white/5 odd:bg-white/[0.01] even:bg-transparent hover:bg-white/[0.06] transition-colors group"
@@ -4771,7 +5154,7 @@ function KpiBox({
                     </tr>
                   ))}
 
-                  {!sortedClosers.length && (
+                  {!visibleClosers.length && (
                     <tr>
                       <td
                         className="py-6 px-3 text-[--muted] text-sm"
@@ -4785,8 +5168,10 @@ function KpiBox({
               </table>
             </div>
           </div>
+          )}
 
             {/* Setters */}
+            {!isCloserFocus && (
             <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(129,140,248,.18),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
               <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                 <div>
@@ -4794,7 +5179,9 @@ function KpiBox({
                     ☎️ Team Setters
                   </div>
                  <div className="text-xs text-[--muted] mt-0.5">
-                  Vue pipeline : leads → RV1 → ventes · vitesse, no-show & qualité de setting
+                  {isSetterFocus
+                    ? "Vue ciblée · setters sélectionnés"
+                    : "Vue pipeline : leads → RV1 → ventes · vitesse, no-show & qualité de setting"}
                 </div>
                 </div>
                 <div className="hidden md:flex items-center gap-2 text-[10px] text-[--muted]">
@@ -4826,7 +5213,7 @@ function KpiBox({
                   </thead>
                   <tbody>
 
-                    {sortedSetters.slice(0, 8).map((s, i) => {
+                    {visibleSetters.map((s, i) => {
                       const rv1PlanVsCalls =
                         (s.leadsReceived || 0) > 0
                           ? (s.rv1PlannedOnHisLeads || 0) / (s.leadsReceived || 1)
@@ -4953,7 +5340,7 @@ function KpiBox({
                       );
                     })}
 
-                    {!sortedSetters.length && (
+                    {!visibleSetters.length && (
                       <tr>
                         <td className="py-6 px-3 text-[--muted] text-sm" colSpan={14}>
                           Aucune donnée setter sur la période sélectionnée.
@@ -4964,6 +5351,7 @@ function KpiBox({
                 </table>
               </div>
             </div>
+            )}
           </div>
 
             {/* DUO STRIP */}
@@ -5080,10 +5468,12 @@ function KpiBox({
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                   const res = await api.get(`/reporting/export/spotlight-setters.csv`, {
-                      params: filterParamsKey,
-                      responseType: 'blob',
-                    });
+                   const res = await getWithFilters<Blob>(
+                      "/reporting/export/spotlight-setters.csv",
+                      {
+                        config: { responseType: "blob" },
+                      }
+                    );
                     const url = URL.createObjectURL(res.data);
                     const a = document.createElement('a');
                     a.href = url;
@@ -5101,10 +5491,12 @@ function KpiBox({
                   type="button"
                   className="btn btn-primary"
                   onClick={async () => {
-                    const res = await api.get(`/reporting/export/spotlight-closers.pdf`, {
-                      params: filterParamsKey,
-                      responseType: 'blob',
-                    });
+                    const res = await getWithFilters<Blob>(
+                      "/reporting/export/spotlight-closers.pdf",
+                      {
+                        config: { responseType: "blob" },
+                      }
+                    );
                     const url = URL.createObjectURL(res.data);
                     const a = document.createElement('a');
                     a.href = url;
@@ -5153,22 +5545,7 @@ function KpiBox({
                     ci-dessus.
                   </p>
                 </div>
-                <PdfExports
-                  from={
-                    typeof range.from === "string"
-                      ? range.from
-                      : range.from
-                      ?.toISOString()
-                      .slice(0, 10)
-                  }
-                  to={
-                    typeof range.to === "string"
-                      ? range.to
-                      : range.to
-                      ?.toISOString()
-                      .slice(0, 10)
-                  }
-                />
+                <PdfExports filters={filterOptionsParams} />
               </div>
             )}
           </div>
@@ -5286,6 +5663,89 @@ function KpiBox({
                       })
                     }
                   />
+                </div>
+                <div>
+                  <div className="label">
+                    Date de création du lead
+                  </div>
+                  <div className="mt-2 space-y-2 text-xs text-[--muted]">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="leadCreatedMode"
+                        checked={draftLeadCreatedMode === "none"}
+                        onChange={() => {
+                          setDraftLeadCreatedMode("none");
+                          setDraftLeadCreatedFrom(undefined);
+                          setDraftLeadCreatedTo(undefined);
+                        }}
+                      />
+                      Aucune
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="leadCreatedMode"
+                        checked={draftLeadCreatedMode === "exact"}
+                        onChange={() => {
+                          setDraftLeadCreatedMode("exact");
+                          const next =
+                            draftLeadCreatedFrom ??
+                            draftLeadCreatedTo;
+                          setDraftLeadCreatedFrom(next);
+                          setDraftLeadCreatedTo(next);
+                        }}
+                      />
+                      Date exacte
+                    </label>
+                    {draftLeadCreatedMode === "exact" && (
+                      <input
+                        type="date"
+                        className="input"
+                        value={draftLeadCreatedFrom ?? ""}
+                        onChange={(e) => {
+                          const next = e.target.value || undefined;
+                          setDraftLeadCreatedFrom(next);
+                          setDraftLeadCreatedTo(next);
+                        }}
+                      />
+                    )}
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="leadCreatedMode"
+                        checked={draftLeadCreatedMode === "range"}
+                        onChange={() => {
+                          setDraftLeadCreatedMode("range");
+                        }}
+                      />
+                      Plage de dates
+                    </label>
+                    {draftLeadCreatedMode === "range" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="date"
+                          className="input"
+                          value={draftLeadCreatedFrom ?? ""}
+                          onChange={(e) =>
+                            setDraftLeadCreatedFrom(
+                              e.target.value || undefined
+                            )
+                          }
+                        />
+                        <input
+                          type="date"
+                          className="input"
+                          value={draftLeadCreatedTo ?? ""}
+                          onChange={(e) =>
+                            setDraftLeadCreatedTo(
+                              e.target.value || undefined
+                            )
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <div className="label">Fuseau horaire</div>
@@ -5456,36 +5916,42 @@ function KpiBox({
                          console.info("[Filters] apply", {
                           previousAppliedState: buildFilterState(range),
                           nextAppliedState: buildFilterState(draftRange, {
-                            tz: draftTz,
-                            setterIds: draftSetterIds,
-                            closerIds: draftCloserIds,
-                            tags: draftTags,
-                            sources: draftSources,
-                            excludeSources: draftExcludeSources,
-                          }),
-                        });
-                      }
-                      setRange(draftRange);
-                      setTz(draftTz);
-                      setSetterIds(draftSetterIds);
-                      setCloserIds(draftCloserIds);
-                      setTags(draftTags);
-                      setSources(draftSources);
-                      setExcludeSources(draftExcludeSources);
-                      syncFiltersToUrl({
-                        from: draftRange.from
-                          ? toISODate(draftRange.from)
+                          tz: draftTz,
+                          setterIds: draftSetterIds,
+                          closerIds: draftCloserIds,
+                          tags: draftTags,
+                          sources: draftSources,
+                          excludeSources: draftExcludeSources,
+                          leadCreatedFrom: draftLeadCreatedFrom,
+                          leadCreatedTo: draftLeadCreatedTo,
+                        }),
+                      });
+                    }
+                    setRange(draftRange);
+                    setTz(draftTz);
+                    setSetterIds(draftSetterIds);
+                    setCloserIds(draftCloserIds);
+                    setTags(draftTags);
+                    setLeadCreatedFrom(draftLeadCreatedFrom);
+                    setLeadCreatedTo(draftLeadCreatedTo);
+                    setSources(draftSources);
+                    setExcludeSources(draftExcludeSources);
+                    syncFiltersToUrl({
+                      from: draftRange.from
+                        ? toISODate(draftRange.from)
                           : undefined,
                         to: draftRange.to
                           ? toISODate(draftRange.to)
                           : undefined,
                         tz: draftTz,
-                        setterIds: draftSetterIds,
-                        closerIds: draftCloserIds,
-                        tags: draftTags,
-                        sources: draftSources,
-                        excludeSources: draftExcludeSources,
-                      });
+                      setterIds: draftSetterIds,
+                      closerIds: draftCloserIds,
+                      tags: draftTags,
+                      sources: draftSources,
+                      excludeSources: draftExcludeSources,
+                      leadCreatedFrom: draftLeadCreatedFrom,
+                      leadCreatedTo: draftLeadCreatedTo,
+                    });
                       setFiltersOpen(false);
                       if (debugFilters && typeof window !== "undefined") {
                         setTimeout(() => {
@@ -5521,4 +5987,5 @@ function KpiBox({
   );
   
 }
+
 
