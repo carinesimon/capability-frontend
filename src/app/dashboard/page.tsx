@@ -971,7 +971,7 @@ function Trend({
 /* ============================= NORMALIZER FUNNEL ============================= */
 /** Normalise les totaux d’événements pour accepter FR/EN et variantes */
 function normalizeTotals(
-  raw: Record<string, number | undefined> | undefined
+  raw: Record<string, number | undefined> | undefined␊
 ) {
   const T = raw || {};
   const pick = (...keys: string[]) => {
@@ -1103,6 +1103,8 @@ function normalizeTotals(
     ),
   };
 }
+
+type PipelineTotals = ReturnType<typeof normalizeTotals>;
 
 /* ============================= PAGE ============================= */
 export default function DashboardPage() {
@@ -1270,6 +1272,333 @@ export default function DashboardPage() {
     () => normalizedTags.join(","),
     [normalizedTags]
   );
+  const appliedFilterState = useMemo<ReportingFilterState>(
+    () => ({
+      from: fromISO,
+      to: toISO,
+      tz,
+      setterIds: normalizedSetterIds,
+      closerIds: normalizedCloserIds,
+      tags: normalizedTags,
+      leadCreatedFrom,
+      leadCreatedTo,
+    }),
+    [
+      fromISO,
+      toISO,
+      tz,
+      normalizedSetterIds,
+      normalizedCloserIds,
+      normalizedTags,
+      leadCreatedFrom,
+      leadCreatedTo,
+    ]
+  );
+  const buildParams = useCallback(
+    (
+      overrides: Partial<ReportingFilterState> = {},
+      options: { includeTags?: boolean } = {}
+    ): ReportingFilterParams => {
+      const nextFilters = {
+        ...appliedFilterState,
+        ...overrides,
+      };
+      if (options.includeTags === false) {
+        nextFilters.tags = [];
+      }
+      const { sourcesCsv, sourcesExcludeCsv, ...rest } =
+        buildReportingFilterParams(nextFilters);
+      void sourcesCsv;
+      void sourcesExcludeCsv;
+      return rest;
+    },
+    [appliedFilterState]
+  );
+  const filterParamsKey = useMemo(
+    () =>
+      JSON.stringify({
+        from: fromISO,
+        to: toISO,
+        tz,
+        setterIds: normalizedSetterIdsKey,
+        closerIds: normalizedCloserIdsKey,
+        tags: normalizedTagsKey,
+        leadCreatedFrom,
+        leadCreatedTo,
+      }),
+    [
+      fromISO,
+      toISO,
+      tz,
+      normalizedSetterIdsKey,
+      normalizedCloserIdsKey,
+      normalizedTagsKey,
+      leadCreatedFrom,
+      leadCreatedTo,
+    ]
+  );
+  const filterOptionsParams = useMemo(
+    () => buildParams(),
+    [buildParams]
+  );
+  const filterOptionsParamsKey = useMemo(
+    () => JSON.stringify(filterOptionsParams),
+    [filterOptionsParams]
+  );
+  const filterParamsWithoutDates = useMemo(
+    () =>
+      buildParams({
+        from: undefined,
+        to: undefined,
+      }),
+    [buildParams]
+  );
+  const appliedParams = useMemo(
+    () => buildParams(),
+    [buildParams]
+  );
+  const appliedParamsKey = useMemo(
+    () => JSON.stringify(appliedParams),
+    [appliedParams]
+  );
+  const filteredMode = useMemo(
+    () =>
+      Boolean(
+        appliedParams.setterIdsCsv ||
+          appliedParams.closerIdsCsv ||
+          appliedParams.tagsCsv
+      ),
+    [appliedParams]
+  );
+  const filteredModeWithTags = Boolean(
+    filteredMode && appliedParams.tagsCsv
+  );
+
+  const isSameRange = (a: Range, b: Range) => {
+    const aFrom = asDate(a.from)?.getTime() ?? null;
+    const aTo = asDate(a.to)?.getTime() ?? null;
+    const bFrom = asDate(b.from)?.getTime() ?? null;
+    const bTo = asDate(b.to)?.getTime() ?? null;
+    return aFrom === bFrom && aTo === bTo;
+  };
+
+  useEffect(() => {
+    const nextRange: Range = {
+      from: initialFilters.from
+        ? asDate(initialFilters.from) ?? defaultFrom
+        : defaultFrom,
+      to: initialFilters.to
+        ? asDate(initialFilters.to) ?? defaultTo
+        : defaultTo,
+    };
+
+    if (!isSameRange(range, nextRange)) {
+      setRange(nextRange);
+    }
+    if (initialFilters.tz && initialFilters.tz !== tz) {
+      setTz(initialFilters.tz);
+      if (!filtersOpen) {
+        setDraftTz(initialFilters.tz);
+      }
+    }
+    if (!arraysEqual(setterIds, initialFilters.setterIds ?? [])) {
+      setSetterIds(initialFilters.setterIds ?? []);
+    }
+    if (!arraysEqual(closerIds, initialFilters.closerIds ?? [])) {
+      setCloserIds(initialFilters.closerIds ?? []);
+    }
+    if (!arraysEqual(tags, initialFilters.tags ?? [])) {
+      setTags(initialFilters.tags ?? []);
+    }
+    if (initialFilters.leadCreatedFrom !== leadCreatedFrom) {
+      setLeadCreatedFrom(initialFilters.leadCreatedFrom);
+    }
+    if (initialFilters.leadCreatedTo !== leadCreatedTo) {
+      setLeadCreatedTo(initialFilters.leadCreatedTo);
+    }
+  }, [
+    initialFilters,
+    defaultFrom,
+    defaultTo,
+    filtersOpen,
+    range,
+    setterIds,
+    closerIds,
+    tags,
+    leadCreatedFrom,
+    leadCreatedTo,
+    tz,
+  ]);
+
+  const syncFiltersToUrl = (nextFilters: {
+    from?: string;
+    to?: string;
+    tz?: string;
+    setterIds?: string[];
+    closerIds?: string[];
+    tags?: string[];
+    leadCreatedFrom?: string;
+    leadCreatedTo?: string;
+  }) => {
+    const nextParams = updateSearchParamsWithReportingFilters(
+      new URLSearchParams(safeSearch.toString()),
+      nextFilters,
+      { includeSources: false }
+    );
+    const nextQuery = nextParams.toString();
+    const currentQuery = safeSearch.toString();
+    if (nextQuery === currentQuery) return;
+    const url = nextQuery ? `${safePathname}?${nextQuery}` : safePathname;
+    router.replace(url, { scroll: false });
+  };
+
+  // ========= FUNNEL METRICS (pour les tuiles + Funnel) =========
+@@ -948,53 +948,53 @@ function Trend({
+  prev: number;
+  compact?: boolean;
+}) {
+  const diff = curr - (prev || 0);
+  const pct = prev ? (diff / prev) * 100 : curr ? 100 : 0;
+  const up = diff >= 0;
+  return (
+    <span
+      className={`ml-2 ${
+        compact ? "text-[10px]" : "text-xs"
+      } ${up ? "text-emerald-300" : "text-rose-300"}`}
+      title={`${
+        up ? "Hausse" : "Baisse"
+      } de ${Math.abs(diff).toLocaleString("fr-FR")} (${Math.abs(
+        pct
+      ).toFixed(1)}%) vs période précédente`}
+    >
+      {up ? "↑" : "↓"} {Math.abs(diff).toLocaleString("fr-FR")} (
+      {Math.abs(pct).toFixed(1)}%)
+    </span>
+  );
+}
+
+/* ============================= NORMALIZER FUNNEL ============================= */
+/** Normalise les totaux d’événements pour accepter FR/EN et variantes */
+function normalizeTotals(␍␊
+  raw: Record<string, number | undefined> | undefined␍␊
+) {␍␊
+function normalizeTotals(␊
+  raw: Record<string, number | undefined> | undefined␊
+) {␊
+  const T = raw || {};
+  const pick = (...keys: string[]) => {
+    for (const k of keys) {
+      if (T[k] != null) return Number(T[k]);
+    }
+    return 0;
+  };
+
+  return {
+    // -------- Entrées de pipeline --------
+    LEADS_RECEIVED: pick(
+      "LEADS_RECEIVED",
+      "LEAD_RECEIVED",
+      "LEAD_RECU",
+      "LEAD_REÇU",
+      "LEADS"
+    ),
+
+    CALL_REQUESTED: pick(
+      "CALL_REQUESTED",
+      "DEMANDE_APPEL",
+      "CALL_REQUEST",
+      "APPOINTMENT_REQUEST"
+    ),
+
+@@ -1079,55 +1079,57 @@ function normalizeTotals(
+    RV2_POSTPONED: pick(
+      "RV2_POSTPONED",
+      "RV2_RESCHEDULED",
+      "RV2_REPORTÉ",
+      "RV2_REPORTE"
+    ),
+
+    // -------- Sorties de pipeline --------
+    WON: pick("WON"),
+
+    LOST: pick("LOST"),
+
+    NOT_QUALIFIED: pick(
+      "NOT_QUALIFIED",
+      "NON_QUALIFIE",
+      "NON_QUALIFIÉ"
+    ),
+
+    APPOINTMENT_CANCELED: pick(
+      "APPOINTMENT_CANCELED",
+      "APPOINTMENT_CANCELLED",
+      "RDV_ANNULE",
+      "RDV_ANNULÉ",
+      "appointmentCanceled"
+    ),
+  };
+}
+
+/* ============================= PAGE ============================= */
+export default function DashboardPage() {
+  };
+}
+
+type PipelineTotals = ReturnType<typeof normalizeTotals>;
+
+/* ============================= PAGE ============================= */
+export default function DashboardPage() {
+  const debugFilters =
+    process.env.NEXT_PUBLIC_DEBUG_FILTERS === "true" &&
+    process.env.NODE_ENV !== "production";
+  const router = useRouter();
+  const pathname = usePathname();
+  const safePathname = pathname ?? "/";
+  const search = useSearchParams();
+  const safeSearch = useMemo(
+    () => search ?? new URLSearchParams(),
+    [search]
+  );
+   const { sources, excludeSources, setSources, setExcludeSources } =
+    useGlobalFilters();
+  const view = (safeSearch.get("view") || "home") as
+    | "home"
+    | "closers"
+    | "setters"
+    | "contracts"
+    | "users"
+    | "exports";
+
+  const { from: defaultFrom, to: defaultTo } = useMemo(
+    () => currentMonthRange(),
+    []
+  );
+@@ -1248,143 +1250,151 @@ export default function DashboardPage() {
+  );
+  const normalizedTags = useMemo(
+    () => normalizeFilterValues(tags),
+    [tags]
+  );
+  const normalizedSources = useMemo(
+    () => normalizeFilterValues(sources),
+    [sources]
+  );
+  const normalizedExcludeSources = useMemo(
+    () => normalizeFilterValues(excludeSources),
+    [excludeSources]
+  );
+  const normalizedSetterIdsKey = useMemo(
+    () => normalizedSetterIds.join(","),
+    [normalizedSetterIds]
+  );
+  const normalizedCloserIdsKey = useMemo(
+    () => normalizedCloserIds.join(","),
+    [normalizedCloserIds]
+  );
+  const normalizedTagsKey = useMemo(
+    () => normalizedTags.join(","),
+    [normalizedTags]
+  );
   const normalizedSourcesKey = useMemo(
     () => normalizedSources.join(","),
     [normalizedSources]
@@ -1347,6 +1676,71 @@ export default function DashboardPage() {
       leadCreatedTo,
     ]
   );
+  const appliedFilterState = useMemo<ReportingFilterState>(
+    () => ({
+      from: fromISO,
+      to: toISO,
+      tz,
+      setterIds: normalizedSetterIds,
+      closerIds: normalizedCloserIds,
+      tags: normalizedTags,
+      leadCreatedFrom,
+      leadCreatedTo,
+    }),
+    [
+      fromISO,
+      toISO,
+      tz,
+      normalizedSetterIds,
+      normalizedCloserIds,
+      normalizedTags,
+      leadCreatedFrom,
+      leadCreatedTo,
+    ]
+  );
+  const buildParams = useCallback(
+    (
+      overrides: Partial<ReportingFilterState> = {},
+      options: { includeTags?: boolean } = {}
+    ): ReportingFilterParams => {
+      const nextFilters = {
+        ...appliedFilterState,
+        ...overrides,
+      };
+      if (options.includeTags === false) {
+        nextFilters.tags = [];
+      }
+      const { sourcesCsv, sourcesExcludeCsv, ...rest } =
+        buildReportingFilterParams(nextFilters);
+      void sourcesCsv;
+      void sourcesExcludeCsv;
+      return rest;
+    },
+    [appliedFilterState]
+  );
+  const filterParamsKey = useMemo(
+    () =>
+      JSON.stringify({
+        from: fromISO,
+        to: toISO,
+        tz,
+        setterIds: normalizedSetterIdsKey,
+        closerIds: normalizedCloserIdsKey,
+        tags: normalizedTagsKey,
+        leadCreatedFrom,
+        leadCreatedTo,
+      }),
+    [
+      fromISO,
+      toISO,
+      tz,
+      normalizedSetterIdsKey,
+      normalizedCloserIdsKey,
+      normalizedTagsKey,
+      leadCreatedFrom,
+      leadCreatedTo,
+    ]
+  );
   const filterOptionsParams = useMemo(
     () => buildParams(),
     [buildParams]
@@ -1362,6 +1756,34 @@ export default function DashboardPage() {
         to: undefined,
       }),
     [buildParams]
+  );
+  const filterParamsWithoutDates = useMemo(
+    () =>
+      buildParams({
+        from: undefined,
+        to: undefined,
+      }),
+    [buildParams]
+  );
+  const appliedParams = useMemo(
+    () => buildParams(),
+    [buildParams]
+  );
+  const appliedParamsKey = useMemo(
+    () => JSON.stringify(appliedParams),
+    [appliedParams]
+  );
+  const filteredMode = useMemo(
+    () =>
+      Boolean(
+        appliedParams.setterIdsCsv ||
+          appliedParams.closerIdsCsv ||
+          appliedParams.tagsCsv
+      ),
+    [appliedParams]
+  );
+  const filteredModeWithTags = Boolean(
+    filteredMode && appliedParams.tagsCsv
   );
 
   const isSameRange = (a: Range, b: Range) => {
@@ -1388,13 +1810,7 @@ export default function DashboardPage() {
     if (initialFilters.tz && initialFilters.tz !== tz) {
       setTz(initialFilters.tz);
       if (!filtersOpen) {
-        setDraftTz(initialFilters.tz);
-      }
-    }
-    if (!arraysEqual(setterIds, initialFilters.setterIds ?? [])) {
-      setSetterIds(initialFilters.setterIds ?? []);
-    }
-    if (!arraysEqual(closerIds, initialFilters.closerIds ?? [])) {
+@@ -1398,119 +1408,103 @@ export default function DashboardPage() {
       setCloserIds(initialFilters.closerIds ?? []);
     }
     if (!arraysEqual(tags, initialFilters.tags ?? [])) {
@@ -1436,6 +1852,21 @@ export default function DashboardPage() {
       new URLSearchParams(safeSearch.toString()),
       nextFilters,
       { includeSources: true }
+    );
+  const syncFiltersToUrl = (nextFilters: {
+    from?: string;
+    to?: string;
+    tz?: string;
+    setterIds?: string[];
+    closerIds?: string[];
+    tags?: string[];
+    leadCreatedFrom?: string;
+    leadCreatedTo?: string;
+  }) => {
+    const nextParams = updateSearchParamsWithReportingFilters(
+      new URLSearchParams(safeSearch.toString()),
+      nextFilters,
+      { includeSources: false }
     );
     const nextQuery = nextParams.toString();
     const currentQuery = safeSearch.toString();
@@ -1489,6 +1920,36 @@ const funnelData: FunnelProps["data"] = {
   // Ventes
   won: totals.WON,
 };
+  const {
+    data: funnelRaw = {},
+    loading: funnelLoading,
+    error: funnelError,
+  } = useFunnelMetrics(
+    filteredMode ? null : fromDate,
+    filteredMode ? null : toDate,
+    tz,
+    filterParamsWithoutDates
+  );
+
+  const funnelTotals = useMemo(
+    () =>
+      normalizeTotals(
+        funnelRaw as Record<string, number | undefined>
+      ),
+    [funnelRaw]
+  );
+  const emptyPipelineTotals = useMemo(
+    () => normalizeTotals({}),
+    []
+  );
+  const [filteredPipelineTotals, setFilteredPipelineTotals] =
+    useState<PipelineTotals | null>(null);
+  const [filteredPipelineLoading, setFilteredPipelineLoading] =
+    useState(false);
+  const [filteredPipelineError, setFilteredPipelineError] =
+    useState<string | null>(null);
+  const [filteredLeadsSeries, setFilteredLeadsSeries] =
+    useState<MetricSeriesOut | null>(null);
 
   
   // Période précédente (même durée)
@@ -1562,6 +2023,65 @@ const [rv0NsWeekly, setRv0NsWeekly] = useState<Rv0NsWeek[]>(
   const [drillOpen, setDrillOpen] = useState(false);
   const [drillTitle, setDrillTitle] = useState("");
   const [drillRows, setDrillRows] = useState<DrillItem[]>([]);
+
+  const pipelineTotals = useMemo<PipelineTotals>(
+    () =>
+      filteredMode
+        ? filteredPipelineTotals ?? emptyPipelineTotals
+        : funnelTotals,
+    [
+      emptyPipelineTotals,
+      filteredMode,
+      filteredPipelineTotals,
+      funnelTotals,
+    ]
+  );
+  const pipelineLoading = filteredMode
+    ? filteredPipelineLoading
+    : funnelLoading;
+  const pipelineError = filteredMode
+    ? filteredPipelineError
+    : funnelError;
+  const funnelData: FunnelProps["data"] = useMemo(
+    () => ({
+      // Top funnel
+      leads: pipelineTotals.LEADS_RECEIVED,
+      callRequests: pipelineTotals.CALL_REQUESTED,
+      callsTotal: pipelineTotals.CALL_ATTEMPT,
+      callsAnswered: pipelineTotals.CALL_ANSWERED,
+      setterNoShow: pipelineTotals.SETTER_NO_SHOW,
+
+      // RV0
+      rv0P: pipelineTotals.RV0_PLANNED,
+      rv0H: pipelineTotals.RV0_HONORED,
+      rv0NS: pipelineTotals.RV0_NO_SHOW,
+      rv0C: pipelineTotals.RV0_CANCELED,
+      rv0NQ:
+        (pipelineTotals.RV0_NOT_QUALIFIED_1 || 0) +
+        (pipelineTotals.RV0_NOT_QUALIFIED_2 || 0),
+      rv0Nurturing: pipelineTotals.RV0_NURTURING || 0,
+
+      // RV1
+      rv1P: pipelineTotals.RV1_PLANNED,
+      rv1H: pipelineTotals.RV1_HONORED,
+      rv1NS: pipelineTotals.RV1_NO_SHOW,
+      rv1Postponed: pipelineTotals.RV1_POSTPONED ?? 0,
+      rv1FollowupCloser: pipelineTotals.RV1_FOLLOWUP || 0,
+      rv1C: pipelineTotals.RV1_CANCELED,
+      rv1NQ: pipelineTotals.RV1_NOT_QUALIFIED ?? 0,
+
+      // RV2
+      rv2P: pipelineTotals.RV2_PLANNED,
+      rv2H: pipelineTotals.RV2_HONORED,
+      rv2NS: pipelineTotals.RV2_NO_SHOW,
+      rv2C: pipelineTotals.RV2_CANCELED,
+      rv2Postponed: pipelineTotals.RV2_POSTPONED ?? 0,
+
+      // Ventes
+      won: pipelineTotals.WON,
+    }),
+    [pipelineTotals]
+  );
 
 const cancelRateBadgeClass = (rate?: number | null) => {
   const base =
@@ -1859,8 +2379,6 @@ const neutralKpiCell =
       setterIds: [],
       closerIds: [],
       tags: [],
-      sources: [],
-      excludeSources: [],
       leadCreatedFrom: undefined,
       leadCreatedTo: undefined,
     });
@@ -1890,8 +2408,13 @@ const neutralKpiCell =
       overrides?: Partial<ReportingFilterState>;
       extraParams?: Record<string, unknown>;
       config?: AxiosRequestConfig;
+      allowTagFallback?: boolean;
     } = {}) => {
-      const allowTags = !tagsUnsupportedEndpointsRef.current.has(url);
+      const allowTagFallback =
+        options.allowTagFallback ?? !filteredModeWithTags;
+      const allowTags = filteredModeWithTags
+        ? true
+        : !tagsUnsupportedEndpointsRef.current.has(url);
       const params = {
         ...buildParams(options.overrides, { includeTags: allowTags }),
         ...(options.extraParams ?? {}),
@@ -1907,7 +2430,7 @@ const neutralKpiCell =
           params,
         });
       } catch (error) {
-        if (allowTags && isTagsUnsupportedError(error)) {
+        if (allowTags && allowTagFallback && isTagsUnsupportedError(error)) {
           tagsUnsupportedEndpointsRef.current.add(url);
           if (debugFilters) {
             console.info("[Filters] tags unsupported, retrying without tags", {
@@ -1926,7 +2449,7 @@ const neutralKpiCell =
         throw error;
       }
     },
-    [buildParams, debugFilters]
+    [buildParams, debugFilters, filteredModeWithTags]
   );
 
   const areStagesSupported = useCallback(
@@ -1968,6 +2491,12 @@ const neutralKpiCell =
             return res?.data ?? EMPTY_METRIC_SERIES;
           } catch (error) {
             if (
+              filteredModeWithTags &&
+              isTagsUnsupportedError(error)
+            ) {
+              throw error;
+            }
+            if (
               isStageSeriesInvalidError(
                 error,
                 "/metrics/stage-series"
@@ -1982,7 +2511,12 @@ const neutralKpiCell =
       );
       return mergeMetricSeries(results);
     },
-    [areStagesSupported, getWithFilters, handleStageSeriesInvalid]
+    [
+      areStagesSupported,
+      getWithFilters,
+      handleStageSeriesInvalid,
+      filteredModeWithTags,
+    ]
   );
 
   const fetchStageSeriesForKey = useCallback(
@@ -1990,6 +2524,142 @@ const neutralKpiCell =
       fetchStageSeries(STAGE_SERIES_MAP[key], overrides),
     [fetchStageSeries]
   );
+
+  useEffect(() => {
+    if (!filteredMode) {
+      setFilteredPipelineTotals(null);
+      setFilteredPipelineLoading(false);
+      setFilteredPipelineError(null);
+      setFilteredLeadsSeries(null);
+      return;
+    }
+
+    let cancelled = false;
+    const stages = [
+      "LEADS_RECEIVED",
+      "CALL_REQUESTED",
+      "CALL_ATTEMPT",
+      "CALL_ANSWERED",
+      "SETTER_NO_SHOW",
+      "RV0_PLANNED",
+      "RV0_HONORED",
+      "RV0_NO_SHOW",
+      "RV0_CANCELED",
+      "RV0_NOT_QUALIFIED_1",
+      "RV0_NOT_QUALIFIED_2",
+      "RV0_NURTURING",
+      "RV1_PLANNED",
+      "RV1_HONORED",
+      "RV1_NO_SHOW",
+      "RV1_POSTPONED",
+      "RV1_CANCELED",
+      "RV1_NOT_QUALIFIED",
+      "RV1_FOLLOWUP",
+      "RV2_PLANNED",
+      "RV2_HONORED",
+      "RV2_NO_SHOW",
+      "RV2_POSTPONED",
+      "RV2_CANCELED",
+      "NOT_QUALIFIED",
+      "APPOINTMENT_CANCELED",
+      "WON",
+      "LOST",
+    ] as const;
+
+    async function loadFilteredPipeline() {
+      try {
+        setFilteredPipelineLoading(true);
+        setFilteredPipelineError(null);
+        const results = await Promise.all(
+          stages.map(async (stage) => {
+            if (!areStagesSupported([stage])) {
+              return { stage, data: EMPTY_METRIC_SERIES };
+            }
+            const res = await getWithFilters<MetricSeriesOut>(
+              "/metrics/stage-series",
+              {
+                extraParams: { stage },
+                allowTagFallback: !filteredModeWithTags,
+              }
+            );
+            return {
+              stage,
+              data: res?.data ?? EMPTY_METRIC_SERIES,
+            };
+          })
+        );
+
+        if (cancelled) return;
+        const totals: Record<string, number> = {};
+        let leadsSeries: MetricSeriesOut | null = null;
+        for (const result of results) {
+          totals[result.stage] = result.data?.total ?? 0;
+          if (result.stage === "LEADS_RECEIVED") {
+            leadsSeries = result.data ?? EMPTY_METRIC_SERIES;
+          }
+        }
+
+        setFilteredPipelineTotals({
+          LEADS_RECEIVED: totals.LEADS_RECEIVED ?? 0,
+          CALL_REQUESTED: totals.CALL_REQUESTED ?? 0,
+          CALL_ATTEMPT: totals.CALL_ATTEMPT ?? 0,
+          CALL_ANSWERED: totals.CALL_ANSWERED ?? 0,
+          SETTER_NO_SHOW: totals.SETTER_NO_SHOW ?? 0,
+
+          RV0_PLANNED: totals.RV0_PLANNED ?? 0,
+          RV0_HONORED: totals.RV0_HONORED ?? 0,
+          RV0_NO_SHOW: totals.RV0_NO_SHOW ?? 0,
+          RV0_CANCELED: totals.RV0_CANCELED ?? 0,
+          RV0_NOT_QUALIFIED_1: totals.RV0_NOT_QUALIFIED_1 ?? 0,
+          RV0_NOT_QUALIFIED_2: totals.RV0_NOT_QUALIFIED_2 ?? 0,
+          RV0_NURTURING: totals.RV0_NURTURING ?? 0,
+
+          RV1_PLANNED: totals.RV1_PLANNED ?? 0,
+          RV1_HONORED: totals.RV1_HONORED ?? 0,
+          RV1_NO_SHOW: totals.RV1_NO_SHOW ?? 0,
+          RV1_POSTPONED: totals.RV1_POSTPONED ?? 0,
+          RV1_CANCELED: totals.RV1_CANCELED ?? 0,
+          RV1_NOT_QUALIFIED: totals.RV1_NOT_QUALIFIED ?? 0,
+          RV1_FOLLOWUP: totals.RV1_FOLLOWUP ?? 0,
+
+          RV2_PLANNED: totals.RV2_PLANNED ?? 0,
+          RV2_HONORED: totals.RV2_HONORED ?? 0,
+          RV2_NO_SHOW: totals.RV2_NO_SHOW ?? 0,
+          RV2_POSTPONED: totals.RV2_POSTPONED ?? 0,
+          RV2_CANCELED: totals.RV2_CANCELED ?? 0,
+
+          NOT_QUALIFIED: totals.NOT_QUALIFIED ?? 0,
+          APPOINTMENT_CANCELED: totals.APPOINTMENT_CANCELED ?? 0,
+          WON: totals.WON ?? 0,
+          LOST: totals.LOST ?? 0,
+        });
+        setFilteredLeadsSeries(leadsSeries);
+      } catch (error) {
+        if (cancelled) return;
+        setFilteredPipelineError(
+          extractErrorMessage(error) ||
+            "Erreur de chargement des métriques filtrées."
+        );
+        setFilteredPipelineTotals(null);
+        setFilteredLeadsSeries(null);
+      } finally {
+        if (!cancelled) {
+          setFilteredPipelineLoading(false);
+        }
+      }
+    }
+
+    loadFilteredPipeline();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    areStagesSupported,
+    filteredMode,
+    filteredModeWithTags,
+    getWithFilters,
+    appliedParamsKey,
+  ]);
 
 
   // Auth
@@ -2157,7 +2827,9 @@ const neutralKpiCell =
         // 1) Résumés & séries hebdo
         const [sumRes, leadsRes, weeklyRes, opsRes] = await Promise.all([
           getWithFilters<SummaryOut>("/reporting/summary"),
-          getWithFilters<LeadsReceivedOut>("/metrics/leads-by-day"),
+          filteredMode
+            ? Promise.resolve({ data: null } as { data: LeadsReceivedOut | null })
+            : getWithFilters<LeadsReceivedOut>("/metrics/leads-by-day"),
           getWithFilters<SalesWeeklyItem[]>("/reporting/sales-weekly"),
           getWithFilters<{ ok: true; rows: WeeklyOpsRow[] }>(
             "/reporting/weekly-ops"
@@ -2169,7 +2841,84 @@ const neutralKpiCell =
         // Résumé global
         setSummary(sumRes.data || null);
         setLeadsRcv(leadsRes.data || null);
-        setSalesWeekly((weeklyRes.data || []).sort((a, b) => a.weekStart.localeCompare(b.weekStart)));
+
+        let weeklyRows = (weeklyRes.data || []).sort((a, b) =>
+          a.weekStart.localeCompare(b.weekStart)
+        );
+        if (filteredMode) {
+          const summaryRevenue = sumRes.data?.totals?.revenue ?? 0;
+          const summaryCount = sumRes.data?.totals?.salesCount ?? 0;
+          const weeklyRevenue = weeklyRows.reduce(
+            (s, w) => s + (w.revenue || 0),
+            0
+          );
+          const weeklyCount = weeklyRows.reduce(
+            (s, w) => s + (w.count || 0),
+            0
+          );
+          const needsFallback =
+            (summaryRevenue > 0 || summaryCount > 0) &&
+            (Math.abs(weeklyRevenue - summaryRevenue) > 1 ||
+              weeklyCount !== summaryCount);
+
+          if (needsFallback) {
+            const wonRes = await getWithFilters<DrillResponse>(
+              "/reporting/drill/won",
+              {
+                extraParams: { limit: 5000 },
+                allowTagFallback: !filteredModeWithTags,
+              }
+            );
+            const items = wonRes.data?.items ?? [];
+            const bucketMap = new Map<
+              string,
+              { weekStart: Date; weekEnd: Date; revenue: number; count: number }
+            >();
+            const mondayLocal = (d: Date) => {
+              const dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+              const dow = (dd.getDay() + 6) % 7;
+              dd.setDate(dd.getDate() - dow);
+              return dd;
+            };
+            const sundayLocal = (d: Date) => {
+              const m = mondayLocal(d);
+              const s = new Date(m);
+              s.setDate(s.getDate() + 6);
+              s.setHours(23, 59, 59, 999);
+              return s;
+            };
+
+            for (const item of items) {
+              const dateValue = item.stageUpdatedAt ?? item.createdAt;
+              if (!dateValue) continue;
+              const when = new Date(dateValue);
+              if (isNaN(when.getTime())) continue;
+              const ws = mondayLocal(when);
+              const we = sundayLocal(when);
+              const key = ws.toISOString();
+              const row = bucketMap.get(key) ?? {
+                weekStart: ws,
+                weekEnd: we,
+                revenue: 0,
+                count: 0,
+              };
+              row.revenue += Number(item.saleValue || 0);
+              row.count += 1;
+              bucketMap.set(key, row);
+            }
+
+            weeklyRows = Array.from(bucketMap.values())
+              .sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime())
+              .map((row) => ({
+                weekStart: row.weekStart.toISOString(),
+                weekEnd: row.weekEnd.toISOString(),
+                revenue: row.revenue,
+                count: row.count,
+              }));
+          }
+        }
+
+        setSalesWeekly(weeklyRows);
         const opsSorted = (opsRes.data?.rows || []).sort((a, b) => a.weekStart.localeCompare(b.weekStart));
         setOps(opsSorted);
 
@@ -2265,10 +3014,12 @@ const neutralKpiCell =
     authError,
     filterParamsKey,
     fetchStageSeriesForKey,
+    filteredMode,
+    filteredModeWithTags,
     fromISO,
     getWithFilters,
     toISO,
-  ]);  
+  ]); 
   // Classements (setters / closers)
   // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
 // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
@@ -2754,11 +3505,7 @@ useEffect(() => {
     topDuo,
   ]);
 
-  // ================== KPIs (avec fallback robuste) ==================
-  const normalizedTotals = useMemo(
-    () => normalizeTotals(totals as any),
-    [totals]
-  );
+    // ================== KPIs (avec fallback robuste) ==================
 
 // KPI business: fallback vers spotlight pour garantir la cohérence en vue filtrée.
   const kpiRevenue = isCloserFocus
@@ -2766,10 +3513,11 @@ useEffect(() => {
     : isSetterFocus
     ? focusedSetterTotals?.revenue ?? 0
     : summary?.totals?.revenue ?? 0;
-  // Leads: d’abord l’endpoint dédié, sinon fallback sur le funnel normalisé
-  const kpiLeads =
-    (leadsRcv?.total ?? 0) ||
-    normalizedTotals.LEADS_RECEIVED ||
+  // Leads: endpoint dédié (ou stage series en vue filtrée)
+  const kpiLeads = filteredMode
+    ? filteredLeadsSeries?.total ?? 0
+    : (leadsRcv?.total ?? 0) ||
+      (summary?.totals?.leads ?? 0); ||
     (summary?.totals?.leads ?? 0);
 
 const kpiRv1Honored =
@@ -2782,6 +3530,9 @@ const kpiSales = isCloserFocus
     : isSetterFocus
     ? focusedSetterTotals?.sales ?? 0
     : summary?.totals?.salesCount ?? 0;
+  const leadsByDaySeries = filteredMode
+    ? filteredLeadsSeries
+    : leadsRcv;
   // Global rates (affichage)
   const globalSetterQual = useMemo(() => {
     const num = settersWithRates.reduce(
@@ -3574,7 +4325,7 @@ function KpiBox({
 
             {/* Aperçu */}
             {(() => {
-              const N = normalizeTotals(totals as any);
+              const N = pipelineTotals;
               const chip = (
                 label: string,
                 value: number | string,
@@ -3596,23 +4347,23 @@ function KpiBox({
                   )}
                 </div>
               );
-              if (funnelLoading) {
+              if (pipelineLoading) {
                 return (
                   <div className="mt-3 text-[--muted] text-sm">
                     Chargement des métriques du funnel…
                   </div>
                 );
               }
-              if (funnelError) {
+              if (pipelineError) {
                 return (
                   <div className="mt-3 text-rose-300 text-sm">
-                    Erreur funnel: {String(funnelError)}
+                    Erreur funnel: {String(pipelineError)}
                   </div>
                 );
               }
               return (() => {
-                const N = normalizeTotals(totals as any);
-
+                const N = pipelineTotals;
+␊
                 const chip = (
                   label: string,
                   value: number | string,
@@ -3635,7 +4386,7 @@ function KpiBox({
                   </div>
                 );
 
-                if (funnelLoading) {
+                if (pipelineLoading) {
                   return (
                     <div className="mt-3 text-[--muted] text-sm">
                       Chargement des métriques du funnel…
@@ -3643,16 +4394,17 @@ function KpiBox({
                   );
                 }
 
-                if (funnelError) {
+                if (pipelineError) {
                   return (
                     <div className="mt-3 text-rose-300 text-sm">
-                      Erreur funnel: {String(funnelError)}
+                      Erreur funnel: {String(pipelineError)}
                     </div>
                   );
                 }
 
-                const leadsTotal =
-                  (leadsRcv?.total ?? 0) || N.LEADS_RECEIVED;
+                const leadsTotal = filteredMode
+                  ? N.LEADS_RECEIVED
+                  : leadsRcv?.total ?? 0;
                 const callReq = N.CALL_REQUESTED;
                 const rv0Done = N.RV0_HONORED;
 
@@ -3704,7 +4456,7 @@ function KpiBox({
                     drill
                   </div>
                   {(() => {
-                    const N = normalizeTotals(totals as any);
+                    const N = pipelineTotals;
                     return (
                       <Funnel
                         data={funnelData} /*{{
@@ -3749,10 +4501,11 @@ function KpiBox({
 
                   {/* Ratios avancés */}
                   {(() => {
-                    const N = normalizeTotals(totals as any);
+                    const N = pipelineTotals;
 
-                    const leadsTotal =
-                      (leadsRcv?.total ?? 0) || N.LEADS_RECEIVED;
+                    const leadsTotal = filteredMode
+                      ? N.LEADS_RECEIVED
+                      : leadsRcv?.total ?? 0;
                     const callReq = N.CALL_REQUESTED;
                     const rv0Planned = N.RV0_PLANNED ?? 0;
                     const rv0Done = N.RV0_HONORED;
@@ -4104,20 +4857,20 @@ function KpiBox({
                   Leads reçus par jour{focusScopeSuffix}
                 </div>
                 <div className="text-xs text-[--muted]">
-                  {(leadsRcv?.total ?? 0).toLocaleString(
+                  {(leadsByDaySeries?.total ?? 0).toLocaleString(
                     "fr-FR"
                   )}{" "}
                   au total
                 </div>
               </div>
               <div className="h-64 mt-2">
-                {leadsRcv?.byDay?.length ? (
+                {leadsByDaySeries?.byDay?.length ? (
                   <ResponsiveContainer
                     width="100%"
                     height="100%"
                   >
                     <BarChart
-                      data={leadsRcv.byDay.map((d) => ({
+                      data={leadsByDaySeries.byDay.map((d) => ({
                         day: new Date(
                           d.day
                         ).toLocaleDateString("fr-FR"),
@@ -5969,8 +6722,6 @@ function KpiBox({
                       setterIds: draftSetterIds,
                       closerIds: draftCloserIds,
                       tags: draftTags,
-                      sources,
-                      excludeSources,
                       leadCreatedFrom: draftLeadCreatedFrom,
                       leadCreatedTo: draftLeadCreatedTo,
                     });
@@ -6009,6 +6760,7 @@ function KpiBox({
   );
   
 }
+
 
 
 
