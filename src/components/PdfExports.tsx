@@ -2,18 +2,21 @@
 
 import { useState } from "react";
 import api from "@/lib/api"; // <-- axios déjà configuré avec baseURL et Authorization
+import type { ReportingFilterParams } from "@/lib/reportingFilters";
 // Si besoin d’URL absolue (debug/log), on garde la base:
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 type Props = {
-  from?: string;
-  to?: string;
+    filters: ReportingFilterParams;
 };
 
-function buildQs(from?: string, to?: string) {
+function buildQs(params: ReportingFilterParams) {
   const q = new URLSearchParams();
-  if (from) q.set("from", from);
-  if (to) q.set("to", to);
+  Object.entries(params).forEach(([key, value]) => {
+    if (typeof value === "string" && value.length > 0) {
+      q.set(key, value);
+    }
+  });
   return q.toString();
 }
 
@@ -40,14 +43,15 @@ async function openPreviewViaAxios(url: string) {
   setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 }
 
-export default function PdfExports({ from, to }: Props) {
+export default function PdfExports({ filters }: Props) {
   const [loading, setLoading] = useState<string | null>(null);
-  const qs = buildQs(from, to);
-
+  const qs = buildQs(filters);
   const settersPdfPath = `/pdf-export/setters?${qs}`;
   const closersPdfPath = `/pdf-export/closers?${qs}`;
   const settersHtmlPath = `/pdf-export/setters?${qs}&format=html`;
   const closersHtmlPath = `/pdf-export/closers?${qs}&format=html`;
+  const filenameFrom = filters.from || "from";
+  const filenameTo = filters.to || "to";
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -69,7 +73,10 @@ export default function PdfExports({ from, to }: Props) {
             onClick={async () => {
               try {
                 setLoading("setters-pdf");
-                await downloadViaAxios(settersPdfPath, `setters_${from || "from"}_${to || "to"}.pdf`);
+                await downloadViaAxios(
+                  settersPdfPath,
+                  `setters_${filenameFrom}_${filenameTo}.pdf`
+                );;
               } catch (e: any) {
                 alert(e?.message || "Téléchargement impossible");
               } finally {
@@ -120,7 +127,10 @@ export default function PdfExports({ from, to }: Props) {
             onClick={async () => {
               try {
                 setLoading("closers-pdf");
-                await downloadViaAxios(closersPdfPath, `closers_${from || "from"}_${to || "to"}.pdf`);
+                await downloadViaAxios(
+                  closersPdfPath,
+                  `closers_${filenameFrom}_${filenameTo}.pdf`
+                );
               } catch (e: any) {
                 alert(e?.message || "Téléchargement impossible");
               } finally {
