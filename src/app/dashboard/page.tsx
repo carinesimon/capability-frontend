@@ -971,7 +971,7 @@ function Trend({
 /* ============================= NORMALIZER FUNNEL ============================= */
 /** Normalise les totaux d’événements pour accepter FR/EN et variantes */
 function normalizeTotals(
-  raw: Record<string, number | undefined> | undefined␊
+  raw: Record<string, number | undefined> | undefined
 ) {
   const T = raw || {};
   const pick = (...keys: string[]) => {
@@ -6760,6 +6760,7 @@ function KpiBox({
   );
   
 }
+
 
 
 
