@@ -65,6 +65,11 @@ export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const safeSearchParams = useMemo(
+    () => searchParams ?? new URLSearchParams(),
+    [searchParams]
+  );
+  const safePathname = pathname ?? "/";
   const [me, setMe] = useState<Me | null>(null);
 
   useEffect(() => {
@@ -98,10 +103,17 @@ const items: NavItem[] = [
     const hrefPath = url.pathname;
     const hrefView = url.searchParams.get("view");
     if (hrefPath === "/dashboard") {
-      if (hrefView) return pathname === "/dashboard" && searchParams.get("view") === hrefView;
-      return pathname === "/dashboard" && !searchParams.get("view");
+      if (hrefView) {
+        return (
+          safePathname === "/dashboard" &&
+          safeSearchParams.get("view") === hrefView
+        );
+      }
+      return safePathname === "/dashboard" && !safeSearchParams.get("view");
     }
-    return pathname === hrefPath || pathname.startsWith(hrefPath + "/");
+    return (
+      safePathname === hrefPath || safePathname.startsWith(hrefPath + "/")
+    );
   };
 
   const who = me?.firstName?.trim() || (me?.email ? me.email.split("@")[0] : "—");
