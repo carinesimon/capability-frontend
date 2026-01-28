@@ -16,7 +16,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { getAccessToken } from "@/lib/auth";
 import Clock from "@/components/Clock";
 import PdfExports from "@/components/PdfExports";
-import SourcesFilter from "@/components/SourcesFilter";
 import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 import {
   buildReportingFilterParams,
@@ -59,12 +58,12 @@ const STAGE_SERIES_MAP = {
   callsAnswered: ["CALL_ANSWERED"],
   rv0NoShow: ["RV0_NO_SHOW"],
   rv0Honored: ["RV0_HONORED"],
+  rv1Honored: ["RV1_HONORED"],
   rv1Canceled: ["RV1_CANCELED"],
   rv1Postponed: ["RV1_POSTPONED"],
   rv2Canceled: ["RV2_CANCELED"],
   rv2Postponed: ["RV2_POSTPONED"],
 } as const;
-
 type StageSeriesKey = keyof typeof STAGE_SERIES_MAP;
 
 /* ---------- KPI Ratio chip ---------- */
@@ -1118,12 +1117,8 @@ export default function DashboardPage() {
     () => search ?? new URLSearchParams(),
     [search]
   );
-  const {
-    sources,
-    excludeSources,
-    setSources,
-    setExcludeSources,
-  } = useGlobalFilters();
+   const { sources, excludeSources, setSources, setExcludeSources } =
+    useGlobalFilters();
   const view = (safeSearch.get("view") || "home") as
     | "home"
     | "closers"
@@ -1209,19 +1204,11 @@ export default function DashboardPage() {
       initialFilters.leadCreatedTo
     )
   );
-  const [draftSources, setDraftSources] = useState<string[]>(
-    () => sources
-  );
-  const [draftExcludeSources, setDraftExcludeSources] = useState<string[]>(
-    () => excludeSources
-  );
 
   const buildFilterState = (
     stateRange: Range,
     overrides: Partial<{
       tz: string;
-      sources: string[];
-      excludeSources: string[];
       setterIds: string[];
       closerIds: string[];
       tags: string[];
@@ -1232,8 +1219,6 @@ export default function DashboardPage() {
     from: stateRange.from ? toISODate(stateRange.from) : undefined,
     to: stateRange.to ? toISODate(stateRange.to) : undefined,
     tz: overrides.tz ?? tz,
-    sources: overrides.sources ?? sources,
-    excludeSources: overrides.excludeSources ?? excludeSources,
     setterIds: overrides.setterIds ?? setterIds,
     closerIds: overrides.closerIds ?? closerIds,
     tags: overrides.tags ?? tags,
@@ -1547,6 +1532,8 @@ const funnelData: FunnelProps["data"] = {
   const [mCallsTotal, setMCallsTotal] =
     useState<MetricSeriesOut | null>(null);
   const [mCallsAnswered, setMCallsAnswered] =
+    useState<MetricSeriesOut | null>(null);
+  const [rv1HonoredSeries, setRv1HonoredSeries] =
     useState<MetricSeriesOut | null>(null);
 
   // RV0 no-show par semaine
@@ -1865,8 +1852,6 @@ const neutralKpiCell =
     setDraftLeadCreatedMode("none");
     setSources([]);
     setExcludeSources([]);
-    setDraftSources([]);
-    setDraftExcludeSources([]);
     syncFiltersToUrl({
       from: range.from ? toISODate(range.from) : undefined,
       to: range.to ? toISODate(range.to) : undefined,
@@ -2721,6 +2706,26 @@ useEffect(() => {
         : sortedSetters.slice(0, 8),
     [isSetterFocus, normalizedSetterIds, sortedSetters]
   );
+  const focusedSetterTotals = useMemo(() => {
+    if (!isSetterFocus) return null;
+    return visibleSetters.reduce(
+      (acc, setter) => ({
+        revenue: acc.revenue + Number(setter.revenueFromHisLeads || 0),
+        sales: acc.sales + Number(setter.salesFromHisLeads || 0),
+      }),
+      { revenue: 0, sales: 0 }
+    );
+  }, [isSetterFocus, visibleSetters]);
+  const focusedCloserTotals = useMemo(() => {
+    if (!isCloserFocus) return null;
+    return visibleClosers.reduce(
+      (acc, closer) => ({
+        revenue: acc.revenue + Number(closer.revenueTotal || 0),
+        sales: acc.sales + Number(closer.salesClosed || 0),
+      }),
+      { revenue: 0, sales: 0 }
+    );
+  }, [isCloserFocus, visibleClosers]);
   const topCloser = sortedClosers[0];
   const topSetter = sortedSetters[0];
   const topDuo = duos[0];
@@ -2755,19 +2760,28 @@ useEffect(() => {
     [totals]
   );
 
-  const kpiRevenue = summary?.totals?.revenue ?? 0;
-
+// KPI business: fallback vers spotlight pour garantir la cohérence en vue filtrée.
+  const kpiRevenue = isCloserFocus
+    ? focusedCloserTotals?.revenue ?? 0
+    : isSetterFocus
+    ? focusedSetterTotals?.revenue ?? 0
+    : summary?.totals?.revenue ?? 0;
   // Leads: d’abord l’endpoint dédié, sinon fallback sur le funnel normalisé
   const kpiLeads =
     (leadsRcv?.total ?? 0) ||
     normalizedTotals.LEADS_RECEIVED ||
     (summary?.totals?.leads ?? 0);
 
-  const kpiRv1Honored = funnelData.rv1H ?? 0;
-
+const kpiRv1Honored =
+    rv1HonoredSeries?.total ??
+    funnelData.rv1H ??
+    0;
 // ➕ Nombre total de ventes (deals WON)
-const kpiSales = summary?.totals?.salesCount ?? 0;
-
+const kpiSales = isCloserFocus
+    ? focusedCloserTotals?.sales ?? 0
+    : isSetterFocus
+    ? focusedSetterTotals?.sales ?? 0
+    : summary?.totals?.salesCount ?? 0;
   // Global rates (affichage)
   const globalSetterQual = useMemo(() => {
     const num = settersWithRates.reduce(
@@ -2866,7 +2880,7 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
   // ➕ Nouveau : série quotidienne RV0 honorés
   const [rv0Daily, setRv0Daily] = useState<MetricSeriesOut | null>(null);
 
-  useEffect(() => {
+   useEffect(() => {
     let cancelled = false;
 
     (async () => {
@@ -2880,6 +2894,27 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
         if (!cancelled) setRv0Daily(res);
       } catch {
         if (!cancelled) setRv0Daily(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filterParamsKey, fetchStageSeriesForKey, fromISO, toISO]);
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!fromISO || !toISO) {
+        if (!cancelled) setRv1HonoredSeries(null);
+        return;
+      }
+
+      try {
+        const res = await fetchStageSeriesForKey("rv1Honored");
+        if (!cancelled) setRv1HonoredSeries(res);
+      } catch {
+        if (!cancelled) setRv1HonoredSeries(null);
       }
     })();
 
@@ -3368,8 +3403,6 @@ function KpiBox({
                     leadCreatedTo
                   )
                 );
-                setDraftSources([...sources]);
-                setDraftExcludeSources([...excludeSources]);
                 setDraftTz(tz);
                 setFiltersOpen(true);
               }}
@@ -3626,7 +3659,7 @@ function KpiBox({
                 return (
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {chip(
-                      "Leads reçus",
+                      `Leads reçus${focusScopeSuffix}`,
                       leadsTotal,
                       "Base 100 % – tous les leads froids"
                     )}
@@ -4068,7 +4101,7 @@ function KpiBox({
               <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
               <div className="flex items-center justify-between">
                 <div className="font-medium">
-                  Leads reçus par jour
+                  Leads reçus par jour{focusScopeSuffix}
                 </div>
                 <div className="text-xs text-[--muted]">
                   {(leadsRcv?.total ?? 0).toLocaleString(
@@ -4168,7 +4201,8 @@ function KpiBox({
                 )}
               </div>
               <div className="text-[11px] text-[--muted] mt-2">
-                Basé sur la <b>date de création</b> du contact.
+                Basé sur la <b>date de création</b> du contact
+                {focusScopeSuffix || ""}.
               </div>
             </div>
 
@@ -5763,14 +5797,6 @@ function KpiBox({
                   </select>
                 </div>
 
-                <SourcesFilter
-                  sources={draftSources}
-                  excludeSources={draftExcludeSources}
-                  params={filterOptionsParams}
-                  onSourcesChange={setDraftSources}
-                  onExcludeSourcesChange={setDraftExcludeSources}
-                />
-
                 {filterOptionsError && (
                   <div className="text-xs text-amber-200/90">
                     {filterOptionsError}
@@ -5920,8 +5946,6 @@ function KpiBox({
                           setterIds: draftSetterIds,
                           closerIds: draftCloserIds,
                           tags: draftTags,
-                          sources: draftSources,
-                          excludeSources: draftExcludeSources,
                           leadCreatedFrom: draftLeadCreatedFrom,
                           leadCreatedTo: draftLeadCreatedTo,
                         }),
@@ -5934,8 +5958,6 @@ function KpiBox({
                     setTags(draftTags);
                     setLeadCreatedFrom(draftLeadCreatedFrom);
                     setLeadCreatedTo(draftLeadCreatedTo);
-                    setSources(draftSources);
-                    setExcludeSources(draftExcludeSources);
                     syncFiltersToUrl({
                       from: draftRange.from
                         ? toISODate(draftRange.from)
@@ -5947,8 +5969,8 @@ function KpiBox({
                       setterIds: draftSetterIds,
                       closerIds: draftCloserIds,
                       tags: draftTags,
-                      sources: draftSources,
-                      excludeSources: draftExcludeSources,
+                      sources,
+                      excludeSources,
                       leadCreatedFrom: draftLeadCreatedFrom,
                       leadCreatedTo: draftLeadCreatedTo,
                     });
@@ -5987,5 +6009,6 @@ function KpiBox({
   );
   
 }
+
 
 
