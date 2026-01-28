@@ -10,13 +10,9 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import {
-  parseCsv,
-  serializeCsv,
-  setGlobalSourcesFilters,
-} from "@/lib/globalSourcesFilters";
+import { serializeCsv } from "@/lib/globalSourcesFilters";
 
-export type GlobalSourcesFiltersContextValue = {
+export type GlobalFiltersContextValue = {
   sources: string[];
   excludeSources: string[];
   setSources: Dispatch<SetStateAction<string[]>>;
@@ -25,8 +21,17 @@ export type GlobalSourcesFiltersContextValue = {
   sourcesExcludeCsv?: string;
 };
 
-const GlobalSourcesFiltersContext =
-  createContext<GlobalSourcesFiltersContextValue | null>(null);
+const GlobalFiltersContext = createContext<GlobalFiltersContextValue | null>(
+  null
+);
+
+function parseCsv(value: string | null): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 function arraysEqual(a: string[], b: string[]) {
   if (a.length !== b.length) return false;
@@ -36,7 +41,7 @@ function arraysEqual(a: string[], b: string[]) {
   return true;
 }
 
-export default function GlobalSourcesFilterProvider({
+export default function GlobalFiltersProvider({
   children,
 }: {
   children: ReactNode;
@@ -44,12 +49,17 @@ export default function GlobalSourcesFilterProvider({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const safePathname = pathname ?? "/";
+  const safeSearchParams = useMemo(
+    () => searchParams ?? new URLSearchParams(),
+    [searchParams]
+  );
 
   const [sources, setSources] = useState<string[]>(() =>
-    parseCsv(searchParams.get("sourcesCsv"))
+    parseCsv(safeSearchParams.get("sourcesCsv"))
   );
   const [excludeSources, setExcludeSources] = useState<string[]>(() =>
-    parseCsv(searchParams.get("sourcesExcludeCsv"))
+    parseCsv(safeSearchParams.get("sourcesExcludeCsv"))
   );
 
   const sourcesCsv = useMemo(
@@ -62,8 +72,8 @@ export default function GlobalSourcesFilterProvider({
   );
 
   useEffect(() => {
-    const nextSources = parseCsv(searchParams.get("sourcesCsv"));
-    const nextExclude = parseCsv(searchParams.get("sourcesExcludeCsv"));
+    const nextSources = parseCsv(safeSearchParams.get("sourcesCsv"));
+    const nextExclude = parseCsv(safeSearchParams.get("sourcesExcludeCsv"));
 
     setSources((prev) =>
       arraysEqual(prev, nextSources) ? prev : nextSources
@@ -71,14 +81,10 @@ export default function GlobalSourcesFilterProvider({
     setExcludeSources((prev) =>
       arraysEqual(prev, nextExclude) ? prev : nextExclude
     );
-  }, [searchParams]);
-
-  useEffect(() => {
-    setGlobalSourcesFilters({ sourcesCsv, sourcesExcludeCsv });
-  }, [sourcesCsv, sourcesExcludeCsv]);
+  }, [safeSearchParams]);
 
   const updateUrl = useCallback(() => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(safeSearchParams.toString());
     if (sourcesCsv) {
       params.set("sourcesCsv", sourcesCsv);
     } else {
@@ -92,12 +98,18 @@ export default function GlobalSourcesFilterProvider({
     }
 
     const nextQuery = params.toString();
-    const currentQuery = searchParams.toString();
+    const currentQuery = safeSearchParams.toString();
 
     if (nextQuery === currentQuery) return;
-    const url = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    const url = nextQuery ? `${safePathname}?${nextQuery}` : safePathname;
     router.replace(url, { scroll: false });
-  }, [pathname, router, searchParams, sourcesCsv, sourcesExcludeCsv]);
+  }, [
+    safePathname,
+    router,
+    safeSearchParams,
+    sourcesCsv,
+    sourcesExcludeCsv,
+  ]);
 
   useEffect(() => {
     updateUrl();
@@ -116,13 +128,13 @@ export default function GlobalSourcesFilterProvider({
   );
 
   return (
-    <GlobalSourcesFiltersContext.Provider value={value}>
+    <GlobalFiltersContext.Provider value={value}>
       {children}
-    </GlobalSourcesFiltersContext.Provider>
+    </GlobalFiltersContext.Provider>
   );
 }
 
-export function useGlobalSourcesFilters() {
+export function useGlobalFilters() {
   const ctx = useContext(GlobalSourcesFiltersContext);
   if (!ctx) {
     throw new Error(
