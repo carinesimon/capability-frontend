@@ -2696,7 +2696,6 @@ async function openAppointmentsDrill(params: {
       };
     }
   }
-  }
   async function openCallRequestsDrill() {
     const res: any = await fetchSafe(
       "/reporting/drill/call-requests",
@@ -5516,6 +5515,7 @@ function KpiBox({
     </div>
   );
 }
+
 
 
 
