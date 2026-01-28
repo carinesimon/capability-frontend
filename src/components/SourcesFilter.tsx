@@ -1,9 +1,9 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
+import api from "@/lib/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import api from "@/lib/api";
 import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 import type { ReportingFilterParams } from "@/lib/reportingFilters";
 
@@ -64,7 +64,7 @@ export default function SourcesFilter({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tagsUnsupportedRef = useRef(false);
-  
+
   const normalizeOptions = (payload: SourcesResponse): SourceOption[] => {
     const list = Array.isArray(payload) ? payload : payload?.sources ?? [];
 
@@ -107,11 +107,18 @@ export default function SourcesFilter({
 
   useEffect(() => {
     let cancelled = false;
-    
+
     async function loadSources() {
       try {
         setLoading(true);
         setError(null);
+
+        const allowTags = !tagsUnsupportedRef.current;
+        const paramsWithTags = params ?? {};
+        const requestParams = { ...paramsWithTags };
+        if (!allowTags && requestParams.tagsCsv) {
+          delete requestParams.tagsCsv;
+        }
 
         if (debugFilters) {
           console.info("[Filters] request", {
@@ -119,14 +126,6 @@ export default function SourcesFilter({
             params: requestParams,
           });
         }
-
-        const res = await api.get<SourcesResponse>("/reporting/sources", {
-          params: requestParams,
-        });
-        if (cancelled) return;
-
-        setOptions(normalizeOptions(res.data));
-      } catch {
         try {
           const res = await api.get<SourcesResponse>("/reporting/sources", {
             params: requestParams,
@@ -162,12 +161,13 @@ export default function SourcesFilter({
             if (cancelled) return;
             setOptions(normalizeOptions(res.data));
           } else {
-            if (!cancelled) {
-              setError("Impossible de charger les sources pour le moment.");
-            }
+            throw error;
           }
         }
-    
+      } catch {
+        if (!cancelled) {
+          setError("Impossible de charger les sources pour le moment.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -178,7 +178,7 @@ export default function SourcesFilter({
     return () => {
       cancelled = true;
     };
-    }, [debugFilters, params]);
+  }, [debugFilters, params]);
   const active = mode === "include" ? sources : excludeSources;
   const setActive = mode === "include" ? setSources : setExcludeSources;
 
