@@ -49,12 +49,17 @@ export default function GlobalFiltersProvider({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const safePathname = pathname ?? "/";
+  const safeSearchParams = useMemo(
+    () => searchParams ?? new URLSearchParams(),
+    [searchParams]
+  );
 
   const [sources, setSources] = useState<string[]>(() =>
-    parseCsv(searchParams.get("sourcesCsv"))
+    parseCsv(safeSearchParams.get("sourcesCsv"))
   );
   const [excludeSources, setExcludeSources] = useState<string[]>(() =>
-    parseCsv(searchParams.get("sourcesExcludeCsv"))
+    parseCsv(safeSearchParams.get("sourcesExcludeCsv"))
   );
 
   const sourcesCsv = useMemo(
@@ -67,8 +72,8 @@ export default function GlobalFiltersProvider({
   );
 
   useEffect(() => {
-    const nextSources = parseCsv(searchParams.get("sourcesCsv"));
-    const nextExclude = parseCsv(searchParams.get("sourcesExcludeCsv"));
+    const nextSources = parseCsv(safeSearchParams.get("sourcesCsv"));
+    const nextExclude = parseCsv(safeSearchParams.get("sourcesExcludeCsv"));
 
     setSources((prev) =>
       arraysEqual(prev, nextSources) ? prev : nextSources
@@ -76,10 +81,10 @@ export default function GlobalFiltersProvider({
     setExcludeSources((prev) =>
       arraysEqual(prev, nextExclude) ? prev : nextExclude
     );
-  }, [searchParams]);
+  }, [safeSearchParams]);
 
   const updateUrl = useCallback(() => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(safeSearchParams.toString());
     if (sourcesCsv) {
       params.set("sourcesCsv", sourcesCsv);
     } else {
@@ -93,12 +98,18 @@ export default function GlobalFiltersProvider({
     }
 
     const nextQuery = params.toString();
-    const currentQuery = searchParams.toString();
+    const currentQuery = safeSearchParams.toString();
 
     if (nextQuery === currentQuery) return;
-    const url = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    const url = nextQuery ? `${safePathname}?${nextQuery}` : safePathname;
     router.replace(url, { scroll: false });
-  }, [pathname, router, searchParams, sourcesCsv, sourcesExcludeCsv]);
+  }, [
+    safePathname,
+    router,
+    safeSearchParams,
+    sourcesCsv,
+    sourcesExcludeCsv,
+  ]);
 
   useEffect(() => {
     updateUrl();
@@ -124,9 +135,11 @@ export default function GlobalFiltersProvider({
 }
 
 export function useGlobalFilters() {
-  const ctx = useContext(GlobalFiltersContext);
+  const ctx = useContext(GlobalSourcesFiltersContext);
   if (!ctx) {
-    throw new Error("useGlobalFilters must be used within GlobalFiltersProvider");
+    throw new Error(
+      "useGlobalSourcesFilters must be used within GlobalSourcesFilterProvider"
+    );
   }
   return ctx;
 }
