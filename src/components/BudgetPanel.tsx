@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { motion } from "framer-motion";
 import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
+import { formatDateInTz } from "@/lib/date";
 type Budget = {
   id: string;
   period: "WEEKLY" | "MONTHLY";
@@ -38,7 +39,7 @@ function mondayISO(d = new Date()) {
   return `${y}-${m}-${dd}`;
 }
 
-export default function BudgetPanel() {
+export default function BudgetPanel({ tz = "Europe/Paris" }: { tz?: string }) {
   const { sourcesCsv, sourcesExcludeCsv } = useGlobalFilters();
   const [weekStartISO, setWeekStartISO] = useState<string>(mondayISO());
   const [amount, setAmount] = useState<string>("0");
@@ -185,7 +186,11 @@ export default function BudgetPanel() {
             )}
             {list.map(b => (
               <tr key={b.id}>
-                <td>{b.weekStart ? new Date(b.weekStart).toLocaleDateString("fr-FR") : "—"}</td>
+                <td>
+                  {b.weekStart
+                    ? formatDateInTz(b.weekStart, tz)
+                    : "—"}
+                </td>
                 <td>{Math.round(b.amount).toLocaleString("fr-FR")} €</td>
                 <td className="text-[--muted]">{new Date(b.updatedAt).toLocaleString("fr-FR")}</td>
               </tr>
