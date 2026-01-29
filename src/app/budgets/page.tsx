@@ -13,7 +13,7 @@
   import { useRouter } from "next/navigation";
   import { motion, AnimatePresence } from "framer-motion";
   import { useFunnelMetrics } from "@/hooks/useFunnelMetrics";
-
+  import { formatDateInTz } from "@/lib/date";
   // ✅ IMPORT DU BUDGET PANEL
   import BudgetPanel from "@/components/BudgetPanel";
 
@@ -727,15 +727,10 @@
         },
       });
       setDrillTitle(
-        `Ventes (WON) – semaine ${new Date(
-          weekStartISO
-        ).toLocaleDateString("fr-FR", {
-          day: "2-digit",
-          month: "2-digit",
-        })} → ${new Date(weekEndISO).toLocaleDateString("fr-FR", {
-          day: "2-digit",
-          month: "2-digit",
-        })}`
+       `Ventes (WON) – semaine ${formatDateInTz(
+          weekStartISO,
+          tz
+        )} → ${formatDateInTz(weekEndISO, tz)}`
       );
       setDrillExtra(
         <div className="mb-3 text-xs text-[--muted]">
@@ -906,13 +901,10 @@
       const ws = w.weekStart.slice(0, 10),
         we = w.weekEnd.slice(0, 10);
       const sales = weeklySalesMap.get(w.weekStart);
-      const headDates = `${new Date(w.weekStart).toLocaleDateString("fr-FR", {
-        day: "2-digit",
-        month: "2-digit",
-      })} → ${new Date(w.weekEnd).toLocaleDateString("fr-FR", {
-        day: "2-digit",
-        month: "2-digit",
-      })}`;
+      const headDates = `${formatDateInTz(
+        w.weekStart,
+        tz
+      )} → ${formatDateInTz(w.weekEnd, tz)}`;
 
       const rv0NoShow = w.rv0NoShow || 0,
         rv0Post = w.rv0Postponed || 0,
@@ -1520,14 +1512,10 @@
             salesWeek?.weekEnd ??
             ws;
 
-          const label = `${new Date(ws).toLocaleDateString("fr-FR", {
-            day: "2-digit",
-            month: "2-digit",
-          })} → ${new Date(we).toLocaleDateString("fr-FR", {
-            day: "2-digit",
-            month: "2-digit",
-          })}`;
-
+          const label = `${formatDateInTz(ws, tz)} → ${formatDateInTz(
+            we,
+            tz
+          )}`;
           const rv0Planned = opsWeek?.rv0Planned ?? 0;
           const rv0Honored = opsWeek?.rv0Honored ?? 0;
 
@@ -1586,6 +1574,7 @@
       weeklyBudgetByWeekStart,
       weeklySalesMap,
       appliedRange,
+      tz,
     ]);
 
     async function saveWeekFinancials(
@@ -1805,7 +1794,7 @@
             ) : (
               <>
                 {/* ✅ PANEL BUDGET SIMPLE */}
-                <BudgetPanel />
+                <BudgetPanel tz={tz} />
 
                 {/* KPIs global période */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-4">
