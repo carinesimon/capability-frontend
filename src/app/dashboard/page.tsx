@@ -5,7 +5,7 @@ import type { AxiosRequestConfig } from "axios";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
-import { currentMonthRange } from "@/lib/date";
+import { currentMonthRange, formatDateInTz, toISODateInTz } from "@/lib/date";
 import Sidebar from "@/components/Sidebar";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 
@@ -322,14 +322,18 @@ const EMPTY_METRIC_SERIES: MetricSeriesOut = {
   byDay: [],
 };
 
-const mergeMetricSeries = (seriesList: MetricSeriesOut[]) => {
+const mergeMetricSeries = (
+  seriesList: MetricSeriesOut[],
+  tz: string
+) => {
   const map = new Map<string, number>();
   for (const series of seriesList) {
     const rows = series?.byDay ?? [];
     for (const row of rows) {
-      const key =
-        row?.day?.slice?.(0, 10) ||
-        new Date(row.day).toISOString().slice(0, 10);
+      const key = row?.day
+        ? toISODateInTz(row.day, tz)
+        : "";
+      if (!key) continue;
       map.set(key, (map.get(key) ?? 0) + Number(row.count || 0));
     }
   }
@@ -1988,9 +1992,9 @@ const neutralKpiCell =
           }
         })
       );
-      return mergeMetricSeries(results);
+      return mergeMetricSeries(results, tz);
     },
-    [areStagesSupported, getWithFilters, handleStageSeriesInvalid]
+    [areStagesSupported, getWithFilters, handleStageSeriesInvalid, tz]
   );
 
   const fetchStageSeriesForKey = useCallback(
@@ -2232,40 +2236,49 @@ const neutralKpiCell =
         const map = new Map<string, { start: Date; end: Date; count: number }>();
 
         for (const entry of series) {
-          const when = new Date(entry.day);
+          const dayKey = entry?.day ? toISODateInTz(entry.day, tz) : "";
+          if (!dayKey) continue;
+          const when = new Date(`${dayKey}T12:00:00Z`);
           if (isNaN(when.getTime())) continue;
 
           const ws = mondayLocal(when);
           const we = sundayLocal(when);
-          const key = ws.toISOString();
+          const key = toISODateInTz(ws, tz);
+          if (!key) continue;
 
           const row = map.get(key) ?? { start: ws, end: we, count: 0 };
           row.count += entry.count;
           map.set(key, row);
         }
-
         // Construit les semaines continues pour la période demandée
         const weeks: Rv0NsWeek[] = [];
         if (fromISO && toISO) {
-          const start = mondayLocal(new Date(fromISO));
-          const end = sundayLocal(new Date(toISO));
+          const startKey = toISODateInTz(fromISO, tz);
+          const endKey = toISODateInTz(toISO, tz);
+          if (!startKey || !endKey) {
+            if (!cancelled) {
+              setRv0NsWeekly([]);
+            }
+            return;
+          }
+          const start = mondayLocal(new Date(`${startKey}T12:00:00Z`));
+          const end = sundayLocal(new Date(`${endKey}T12:00:00Z`));
           for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 7)) {
             const ws = new Date(d);
             const we = sundayLocal(ws);
-            const key = ws.toISOString();
+            const key = toISODateInTz(ws, tz);
             const bucket = map.get(key);
 
             weeks.push({
-              weekStart: ws.toISOString(),
-              weekEnd: we.toISOString(),
+              weekStart: toISODateInTz(ws, tz),
+              weekEnd: toISODateInTz(we, tz),
               label:
-                ws.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) +
-                " → " +
-                we.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
+                `${formatDateInTz(ws, tz)} → ${formatDateInTz(we, tz)}`,
               count: bucket?.count ?? 0,
             });
           }
         }
+
 
         if (!cancelled) {
           setRv0NsWeekly(weeks);
@@ -2291,6 +2304,7 @@ const neutralKpiCell =
     getWithFilters,
     isPersonFiltered,
     toISO,
+    tz,
   ]);   
   // Classements (setters / closers)
   // Spotlight (Setters / Closers) — avec fallback si l'API n'a pas encore les endpoints spotlight
@@ -2986,10 +3000,8 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
         const arr = src?.byDay ?? [];
         for (const it of arr) {
           if (!it?.day) continue;
-          const dayKey =
-            it.day.length >= 10
-              ? it.day.slice(0, 10)
-              : new Date(it.day).toISOString().slice(0, 10);
+          const dayKey = toISODateInTz(it.day, tz);
+          if (!dayKey) continue;
           const row = map.get(dayKey) ?? { rv1: 0, rv2: 0 };
           row[key] += Number(it.count || 0);
           map.set(dayKey, row);
@@ -3005,16 +3017,20 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
 
       // Générer un range continu YYYY-MM-DD
       const out: AnnulPostDailyRow[] = [];
-      const start = new Date(fromISO);
-      const end = new Date(toISO);
-      start.setHours(0, 0, 0, 0);
-      end.setHours(0, 0, 0, 0);
+      const startKey = toISODateInTz(fromISO, tz);
+      const endKey = toISODateInTz(toISO, tz);
+      if (!startKey || !endKey) {
+        if (!cancelled) {
+          setCanceledDaily({ total: 0, byDay: [] });
+        }
+        return;
+      }
+      const start = new Date(`${startKey}T12:00:00Z`);
+      const end = new Date(`${endKey}T12:00:00Z`);
 
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        const key = `${y}-${m}-${dd}`;
+      for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        const key = toISODateInTz(d, tz);
+        if (!key) continue;
         const bucket = map.get(key) ?? { rv1: 0, rv2: 0 };
         out.push({
           day: key,
@@ -3041,6 +3057,7 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
   fromISO,
   isPersonFiltered,
   toISO,
+  tz,
 ]);
   // ======= DRILLS : helpers endpoints =======
 async function openAppointmentsDrill(params: {
@@ -4166,9 +4183,7 @@ function KpiBox({
                     >
                       <BarChart
                         data={leadsRcv.byDay.map((d) => ({
-                          day: new Date(
-                            d.day
-                          ).toLocaleDateString("fr-FR"),
+                          day: formatDateInTz(d.day, tz),
                           count: d.count,
                         }))}
                         margin={{
@@ -4281,19 +4296,10 @@ function KpiBox({
                     <BarChart
                       data={salesWeekly.map((w) => ({
                         label:
-                          new Date(
-                            w.weekStart
-                          ).toLocaleDateString("fr-FR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                          }) +
-                          " → " +
-                          new Date(
-                            w.weekEnd
-                          ).toLocaleDateString("fr-FR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                          }),
+                          `${formatDateInTz(w.weekStart, tz)} → ${formatDateInTz(
+                            w.weekEnd,
+                            tz
+                          )}`,
                         revenue: Math.round(
                           w.revenue
                         ),
@@ -4439,9 +4445,7 @@ function KpiBox({
                   >
                     <BarChart
                       data={mCallReq.byDay.map((d) => ({
-                        day: new Date(
-                          d.day
-                        ).toLocaleDateString("fr-FR"),
+                        day: formatDateInTz(d.day, tz),
                         count: d.count,
                       }))}
                       margin={{
@@ -4542,7 +4546,7 @@ function KpiBox({
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={rv0Daily.byDay.map((d) => ({
-                          day: new Date(d.day).toLocaleDateString("fr-FR"),
+                          day: formatDateInTz(d.day, tz),
                           count: d.count,
                         }))}
                         margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
@@ -6062,4 +6066,5 @@ function KpiBox({
   );
   
 }
+
 
