@@ -1,6 +1,7 @@
 "use client";
 import { reportingApi } from "@/lib/reporting";
 import { buildReportingFilterParams } from "@/lib/reportingFilters";
+import { parseCsv, serializeCsv } from "@/lib/globalSourcesFilters";
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import api from "@/lib/api";
@@ -8,6 +9,7 @@ import Sidebar from "@/components/Sidebar";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 import { currentMonthRange } from "@/lib/date";
 import { motion, AnimatePresence } from "framer-motion";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 // en haut du fichier
 
 /* ================== Types alignés backend ================== */
@@ -376,6 +378,15 @@ const RDV_ANNULES_COLUMN: ColumnConfig = {
 
 /* ================== Page ================== */
 export default function ProspectsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const safePathname = pathname ?? "/prospects";
+  const safeSearch = useMemo(
+    () => search ?? new URLSearchParams(),
+    [search]
+  );
+
   // Période appliquée (Dates) — OK pour DateRangePicker
   const { from: defaultFrom, to: defaultTo } = useMemo(() => currentMonthRange(), []);
   const [range, setRange] = useState<Range>({ from: defaultFrom, to: defaultTo });
@@ -454,6 +465,20 @@ export default function ProspectsPage() {
 
   // ====== Filtres appliqués ======
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const initialSetterIds = useMemo(
+    () => parseCsv(safeSearch.get("setterIds")),
+    [safeSearch]
+  );
+  const initialCloserIds = useMemo(
+    () => parseCsv(safeSearch.get("closerIds")),
+    [safeSearch]
+  );
+  const [appliedSetterIds, setAppliedSetterIds] = useState<string[]>(
+    () => initialSetterIds
+  );
+  const [appliedCloserIds, setAppliedCloserIds] = useState<string[]>(
+    () => initialCloserIds
+  );
   const [q, setQ] = useState("");
   const [tagFilter, setTagFilter] = useState<string>("__ALL__");
   const [sourceFilter, setSourceFilter] = useState<string>("__ALL__");
@@ -463,21 +488,69 @@ export default function ProspectsPage() {
   const [tagDraft, setTagDraft] = useState<string>("__ALL__");
   const [sourceDraft, setSourceDraft] = useState<string>("__ALL__");
   const [rangeDraft, setRangeDraft] = useState<Range>({ from: defaultFrom, to: defaultTo });
+  const [draftSetterIds, setDraftSetterIds] = useState<string[]>(
+    () => initialSetterIds
+  );
+  const [draftCloserIds, setDraftCloserIds] = useState<string[]>(
+    () => initialCloserIds
+  );
 
   const openFilters = () => {
     setQDraft(q);
     setTagDraft(tagFilter);
     setSourceDraft(sourceFilter);
     setRangeDraft({ from: range.from, to: range.to });
+    setDraftSetterIds(appliedSetterIds);
+    setDraftCloserIds(appliedCloserIds);
     setFiltersOpen(true);
+    loadActors();
   };
   const applyFilters = () => {
     setQ(qDraft);
     setTagFilter(tagDraft);
     setSourceFilter(sourceDraft);
     setRange({ from: rangeDraft.from, to: rangeDraft.to });
+    setAppliedSetterIds(draftSetterIds);
+    setAppliedCloserIds(draftCloserIds);
+    syncFiltersToUrl(draftSetterIds, draftCloserIds);
     setFiltersOpen(false);
   };
+
+  const appliedSetterIdsCsv = useMemo(
+    () => serializeCsv(appliedSetterIds),
+    [appliedSetterIds]
+  );
+  const appliedCloserIdsCsv = useMemo(
+    () => serializeCsv(appliedCloserIds),
+    [appliedCloserIds]
+  );
+
+  const syncFiltersToUrl = useCallback(
+    (nextSetterIds: string[], nextCloserIds: string[]) => {
+      const next = new URLSearchParams(safeSearch.toString());
+      const setterCsv = serializeCsv(nextSetterIds);
+      const closerCsv = serializeCsv(nextCloserIds);
+
+      if (setterCsv) {
+        next.set("setterIds", setterCsv);
+      } else {
+        next.delete("setterIds");
+      }
+
+      if (closerCsv) {
+        next.set("closerIds", closerCsv);
+      } else {
+        next.delete("closerIds");
+      }
+
+      const query = next.toString();
+      router.replace(
+        `${safePathname}${query ? `?${query}` : ""}`,
+        { scroll: false }
+      );
+    },
+    [router, safePathname, safeSearch]
+  );
 
   // Prefs affichage
   const [density] = useState<"S" | "M" | "L">("S");
@@ -514,7 +587,12 @@ export default function ProspectsPage() {
 
   /* ================== Data fetch ================== */
   async function loadBoard() {
-    const res = await api.get<BoardResponse>("/prospects/board", { params: { from: fromISO, to: toISO, limit: 200 } });
+    const params: Record<string, string | number> = { limit: 200 };
+    if (fromISO) params.from = fromISO;
+    if (toISO) params.to = toISO;
+    if (appliedSetterIdsCsv) params.setterIds = appliedSetterIdsCsv;
+    if (appliedCloserIdsCsv) params.closerIds = appliedCloserIdsCsv;
+    const res = await api.get<BoardResponse>("/prospects/board", { params });
     setBoard(res.data ?? { columns: {} as any });
   }
   async function loadColumnsConfig() {
@@ -566,7 +644,7 @@ export default function ProspectsPage() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromISO, toISO]);
+  }, [fromISO, toISO, appliedSetterIdsCsv, appliedCloserIdsCsv]);
 
   useEffect(() => {
   let cancelled = false;
@@ -838,6 +916,24 @@ export default function ProspectsPage() {
     return okQ && okTag && okSrc;
   };
 
+  const toggleFilterValue = (
+    value: string,
+    setNext: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    setNext((prev) => (
+      prev.includes(value)
+        ? prev.filter((item) => item !== value)
+        : [...prev, value]
+    ));
+  };
+
+  const formatActorLabel = (actor: UserMini) => {
+    if (actor.firstName && actor.email) {
+      return `${actor.firstName} • ${actor.email}`;
+    }
+    return actor.firstName || actor.email || actor.id;
+  };
+
   const kpi = useMemo(() => {
     const cols = board?.columns;
     const enabled = columns.filter((c) => c.enabled);
@@ -949,6 +1045,8 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
     (q ? 1 : 0) +
     (tagFilter !== "__ALL__" ? 1 : 0) +
     (sourceFilter !== "__ALL__" ? 1 : 0) +
+    (appliedSetterIds.length ? 1 : 0) +
+    (appliedCloserIds.length ? 1 : 0) +
     ((toISODate(defaultFrom) !== fromISO || toISODate(defaultTo) !== toISO) ? 1 : 0);
 
   /* ================== UI helpers ================== */
@@ -1253,6 +1351,47 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div className="label">Setters</div>
+                    <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
+                      {actors.setters.length ? (
+                        actors.setters.map((setter) => (
+                          <label key={`setter-${setter.id}`} className="flex items-center gap-2 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={draftSetterIds.includes(setter.id)}
+                              onChange={() => toggleFilterValue(setter.id, setDraftSetterIds)}
+                            />
+                            <span>{formatActorLabel(setter)}</span>
+                          </label>
+                        ))
+                      ) : (
+                        <div className="text-xs text-[--muted]">Aucun setter.</div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="label">Closers</div>
+                    <div className="mt-2 space-y-1 max-h-40 overflow-auto rounded-lg border border-white/10 bg-white/[0.02] p-2">
+                      {actors.closers.length ? (
+                        actors.closers.map((closer) => (
+                          <label key={`closer-${closer.id}`} className="flex items-center gap-2 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={draftCloserIds.includes(closer.id)}
+                              onChange={() => toggleFilterValue(closer.id, setDraftCloserIds)}
+                            />
+                            <span>{formatActorLabel(closer)}</span>
+                          </label>
+                        ))
+                      ) : (
+                        <div className="text-xs text-[--muted]">Aucun closer.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="mt-2">
                   <div className="label">Période personnalisée</div>
                   <DateRangePicker
@@ -1269,6 +1408,8 @@ function openDrillColumn(col: ColumnConfig, items: Lead[]) {
                       setTagDraft("__ALL__");
                       setSourceDraft("__ALL__");
                       setRangeDraft({ from: defaultFrom, to: defaultTo });
+                      setDraftSetterIds([]);
+                      setDraftCloserIds([]);
                     }}
                   >
                     Réinitialiser
