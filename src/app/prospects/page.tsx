@@ -2,6 +2,11 @@
 import { reportingApi } from "@/lib/reporting";
 import { buildReportingFilterParams } from "@/lib/reportingFilters";
 import { parseCsv, serializeCsv } from "@/lib/globalSourcesFilters";
+import {
+  type ProspectsFiltersState,
+  loadProspectsFilters,
+  saveProspectsFilters,
+} from "@/lib/prospectsFiltersStorage";
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import api from "@/lib/api";
@@ -218,6 +223,58 @@ function toISODate(d?: Date | string) {
   const day = String(dd.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+function asDate(x?: Date | string | null): Date | null {
+  if (!x) return null;
+  const d = x instanceof Date ? x : new Date(x as any);
+  return isNaN(d.getTime()) ? null : d;
+}
+function arraysEqual(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+function isSameRange(a: Range, b: Range) {
+  const aFrom = asDate(a.from)?.getTime() ?? null;
+  const aTo = asDate(a.to)?.getTime() ?? null;
+  const bFrom = asDate(b.from)?.getTime() ?? null;
+  const bTo = asDate(b.to)?.getTime() ?? null;
+  return aFrom === bFrom && aTo === bTo;
+}
+
+const PROSPECTS_FILTER_PARAM_KEYS = [
+  "from",
+  "to",
+  "limit",
+  "q",
+  "tag",
+  "source",
+  "setterIds",
+  "closerIds",
+];
+
+function hasAnyProspectsFilterParams(searchParams: URLSearchParams) {
+  return PROSPECTS_FILTER_PARAM_KEYS.some((key) => searchParams.has(key));
+}
+
+function parseProspectsFiltersFromSearchParams(
+  searchParams: URLSearchParams
+): ProspectsFiltersState {
+  const limitRaw = searchParams.get("limit");
+  const parsedLimit = limitRaw ? Number(limitRaw) : undefined;
+  const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+  return {
+    from: searchParams.get("from") ?? undefined,
+    to: searchParams.get("to") ?? undefined,
+    limit,
+    q: searchParams.get("q") ?? undefined,
+    tag: searchParams.get("tag") ?? undefined,
+    source: searchParams.get("source") ?? undefined,
+    setterIds: parseCsv(searchParams.get("setterIds")),
+    closerIds: parseCsv(searchParams.get("closerIds")),
+  };
+}
 
 /* ================== Couleurs stages (UI) ================== */
 const STAGE_COLOR: Record<LeadStage, string> = {
@@ -389,7 +446,34 @@ export default function ProspectsPage() {
 
   // Période appliquée (Dates) — OK pour DateRangePicker
   const { from: defaultFrom, to: defaultTo } = useMemo(() => currentMonthRange(), []);
-  const [range, setRange] = useState<Range>({ from: defaultFrom, to: defaultTo });
+  const defaultLimit = 200;
+  const hasUrlFilters = useMemo(
+    () => hasAnyProspectsFilterParams(safeSearch),
+    [safeSearch]
+  );
+  const storedFilters = useMemo(
+    () => (hasUrlFilters ? null : loadProspectsFilters()),
+    [hasUrlFilters]
+  );
+  const initialFilters = useMemo(() => {
+    if (hasUrlFilters) {
+      return parseProspectsFiltersFromSearchParams(
+        new URLSearchParams(safeSearch.toString())
+      );
+    }
+    return storedFilters ?? {};
+  }, [hasUrlFilters, safeSearch, storedFilters]);
+  const [range, setRange] = useState<Range>(() => ({
+    from: initialFilters.from
+      ? asDate(initialFilters.from) ?? defaultFrom
+      : defaultFrom,
+    to: initialFilters.to
+      ? asDate(initialFilters.to) ?? defaultTo
+      : defaultTo,
+  }));
+  const [limit, setLimit] = useState<number>(
+    () => initialFilters.limit ?? defaultLimit
+  );
 
   // Strings ISO envoyées à l’API
   const fromISO = toISODate(range.from);
@@ -465,35 +549,43 @@ export default function ProspectsPage() {
 
   // ====== Filtres appliqués ======
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const initialSetterIds = useMemo(
-    () => parseCsv(safeSearch.get("setterIds")),
-    [safeSearch]
-  );
-  const initialCloserIds = useMemo(
-    () => parseCsv(safeSearch.get("closerIds")),
-    [safeSearch]
-  );
   const [appliedSetterIds, setAppliedSetterIds] = useState<string[]>(
-    () => initialSetterIds
+    () => initialFilters.setterIds ?? []
   );
   const [appliedCloserIds, setAppliedCloserIds] = useState<string[]>(
-    () => initialCloserIds
+    () => initialFilters.closerIds ?? []
   );
-  const [q, setQ] = useState("");
-  const [tagFilter, setTagFilter] = useState<string>("__ALL__");
-  const [sourceFilter, setSourceFilter] = useState<string>("__ALL__");
+  const [q, setQ] = useState(() => initialFilters.q ?? "");
+  const [tagFilter, setTagFilter] = useState<string>(
+    () => initialFilters.tag ?? "__ALL__"
+  );
+  const [sourceFilter, setSourceFilter] = useState<string>(
+    () => initialFilters.source ?? "__ALL__"
+  );
 
   // ====== Brouillons de filtres (n’appliquent rien tant qu’on ne clique pas) ======
-  const [qDraft, setQDraft] = useState("");
-  const [tagDraft, setTagDraft] = useState<string>("__ALL__");
-  const [sourceDraft, setSourceDraft] = useState<string>("__ALL__");
-  const [rangeDraft, setRangeDraft] = useState<Range>({ from: defaultFrom, to: defaultTo });
+  const [qDraft, setQDraft] = useState(() => initialFilters.q ?? "");
+  const [tagDraft, setTagDraft] = useState<string>(
+    () => initialFilters.tag ?? "__ALL__"
+  );
+  const [sourceDraft, setSourceDraft] = useState<string>(
+    () => initialFilters.source ?? "__ALL__"
+  );
+  const [rangeDraft, setRangeDraft] = useState<Range>(() => ({
+    from: initialFilters.from
+      ? asDate(initialFilters.from) ?? defaultFrom
+      : defaultFrom,
+    to: initialFilters.to
+      ? asDate(initialFilters.to) ?? defaultTo
+      : defaultTo,
+  }));
   const [draftSetterIds, setDraftSetterIds] = useState<string[]>(
-    () => initialSetterIds
+    () => initialFilters.setterIds ?? []
   );
   const [draftCloserIds, setDraftCloserIds] = useState<string[]>(
-    () => initialCloserIds
+    () => initialFilters.closerIds ?? []
   );
+  const isHydratingRef = useRef(false);
 
   const openFilters = () => {
     setQDraft(q);
@@ -506,15 +598,29 @@ export default function ProspectsPage() {
     loadActors();
   };
   const applyFilters = () => {
+    const nextFrom = toISODate(rangeDraft.from);
+    const nextTo = toISODate(rangeDraft.to);
+    const nextFilters: ProspectsFiltersState = {
+      from: nextFrom,
+      to: nextTo,
+      limit,
+      q: qDraft,
+      tag: tagDraft,
+      source: sourceDraft,
+      setterIds: draftSetterIds,
+      closerIds: draftCloserIds,
+    };
     setQ(qDraft);
     setTagFilter(tagDraft);
     setSourceFilter(sourceDraft);
     setRange({ from: rangeDraft.from, to: rangeDraft.to });
     setAppliedSetterIds(draftSetterIds);
     setAppliedCloserIds(draftCloserIds);
-    syncFiltersToUrl(draftSetterIds, draftCloserIds);
+    syncFiltersToUrl(nextFilters);
+    saveProspectsFilters(nextFilters);
     setFiltersOpen(false);
   };
+
 
   const appliedSetterIdsCsv = useMemo(
     () => serializeCsv(appliedSetterIds),
@@ -526,10 +632,52 @@ export default function ProspectsPage() {
   );
 
   const syncFiltersToUrl = useCallback(
-    (nextSetterIds: string[], nextCloserIds: string[]) => {
+    (nextFilters: ProspectsFiltersState) => {
       const next = new URLSearchParams(safeSearch.toString());
-      const setterCsv = serializeCsv(nextSetterIds);
-      const closerCsv = serializeCsv(nextCloserIds);
+      const setterCsv = serializeCsv(nextFilters.setterIds ?? []);
+      const closerCsv = serializeCsv(nextFilters.closerIds ?? []);
+      const nextFrom = nextFilters.from;
+      const nextTo = nextFilters.to;
+      const nextLimit = nextFilters.limit ?? defaultLimit;
+      const isDefaultRange =
+        toISODate(defaultFrom) === nextFrom &&
+        toISODate(defaultTo) === nextTo;
+
+      if (nextFilters.q) {
+        next.set("q", nextFilters.q);
+      } else {
+        next.delete("q");
+      }
+
+      if (nextFilters.tag && nextFilters.tag !== "__ALL__") {
+        next.set("tag", nextFilters.tag);
+      } else {
+        next.delete("tag");
+      }
+
+      if (nextFilters.source && nextFilters.source !== "__ALL__") {
+        next.set("source", nextFilters.source);
+      } else {
+        next.delete("source");
+      }
+
+      if (!isDefaultRange && nextFrom) {
+        next.set("from", nextFrom);
+      } else {
+        next.delete("from");
+      }
+
+      if (!isDefaultRange && nextTo) {
+        next.set("to", nextTo);
+      } else {
+        next.delete("to");
+      }
+
+      if (nextLimit !== defaultLimit) {
+        next.set("limit", String(nextLimit));
+      } else {
+        next.delete("limit");
+      }
 
       if (setterCsv) {
         next.set("setterIds", setterCsv);
@@ -544,13 +692,104 @@ export default function ProspectsPage() {
       }
 
       const query = next.toString();
+      const currentQuery = safeSearch.toString();
+      if (query === currentQuery) return;
       router.replace(
         `${safePathname}${query ? `?${query}` : ""}`,
         { scroll: false }
       );
     },
-    [router, safePathname, safeSearch]
+    [defaultFrom, defaultLimit, defaultTo, router, safePathname, safeSearch]
   );
+
+  useEffect(() => {
+    const nextRange: Range = {
+      from: initialFilters.from
+        ? asDate(initialFilters.from) ?? defaultFrom
+        : defaultFrom,
+      to: initialFilters.to
+        ? asDate(initialFilters.to) ?? defaultTo
+        : defaultTo,
+    };
+
+    if (!isSameRange(range, nextRange)) {
+      setRange(nextRange);
+    }
+    const nextLimit = initialFilters.limit ?? defaultLimit;
+    if (nextLimit !== limit) {
+      setLimit(nextLimit);
+    }
+    if (!arraysEqual(appliedSetterIds, initialFilters.setterIds ?? [])) {
+      setAppliedSetterIds(initialFilters.setterIds ?? []);
+    }
+    if (!arraysEqual(appliedCloserIds, initialFilters.closerIds ?? [])) {
+      setAppliedCloserIds(initialFilters.closerIds ?? []);
+    }
+    if ((initialFilters.q ?? "") !== q) {
+      setQ(initialFilters.q ?? "");
+    }
+    if ((initialFilters.tag ?? "__ALL__") !== tagFilter) {
+      setTagFilter(initialFilters.tag ?? "__ALL__");
+    }
+    if ((initialFilters.source ?? "__ALL__") !== sourceFilter) {
+      setSourceFilter(initialFilters.source ?? "__ALL__");
+    }
+  }, [
+    appliedCloserIds,
+    appliedSetterIds,
+    defaultFrom,
+    defaultTo,
+    initialFilters,
+    limit,
+    q,
+    range.from,
+    range.to,
+    sourceFilter,
+    tagFilter,
+  ]);
+
+  const appliedFilterState = useMemo<ProspectsFiltersState>(
+    () => ({
+      from: fromISO,
+      to: toISO,
+      limit,
+      q,
+      tag: tagFilter,
+      source: sourceFilter,
+      setterIds: appliedSetterIds,
+      closerIds: appliedCloserIds,
+    }),
+    [
+      fromISO,
+      toISO,
+      limit,
+      q,
+      tagFilter,
+      sourceFilter,
+      appliedSetterIds,
+      appliedCloserIds,
+    ]
+  );
+
+  useEffect(() => {
+    if (isHydratingRef.current) return;
+    if (hasUrlFilters) {
+      isHydratingRef.current = true;
+      saveProspectsFilters(appliedFilterState);
+      return;
+    }
+    if (!storedFilters) {
+      isHydratingRef.current = true;
+      return;
+    }
+    isHydratingRef.current = true;
+    syncFiltersToUrl(storedFilters);
+  }, [
+    appliedFilterState,
+    hasUrlFilters,
+    storedFilters,
+    syncFiltersToUrl,
+  ]);
 
   // Prefs affichage
   const [density] = useState<"S" | "M" | "L">("S");
@@ -587,7 +826,7 @@ export default function ProspectsPage() {
 
   /* ================== Data fetch ================== */
   async function loadBoard() {
-    const params: Record<string, string | number> = { limit: 200 };
+    const params: Record<string, string | number> = { limit };
     if (fromISO) params.from = fromISO;
     if (toISO) params.to = toISO;
     if (appliedSetterIdsCsv) params.setterIds = appliedSetterIdsCsv;
@@ -644,8 +883,8 @@ export default function ProspectsPage() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromISO, toISO, appliedSetterIdsCsv, appliedCloserIdsCsv]);
-
+  }, [fromISO, toISO, appliedSetterIdsCsv, appliedCloserIdsCsv, limit]);
+  
   useEffect(() => {
   let cancelled = false;
   (async () => {
