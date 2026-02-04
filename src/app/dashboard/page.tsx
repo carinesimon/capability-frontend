@@ -19,6 +19,7 @@ import PdfExports from "@/components/PdfExports";
 import { useGlobalFilters } from "@/components/GlobalFiltersProvider";
 import {
   buildReportingFilterParams,
+  hasAnyReportingFilterParams,
   parseReportingFiltersFromSearchParams,
   updateSearchParamsWithReportingFilters,
 } from "@/lib/reportingFilters";
@@ -26,6 +27,10 @@ import type {
   ReportingFilterParams,
   ReportingFilterState,
 } from "@/lib/reportingFilters";
+import {
+  loadDashboardFilters,
+  saveDashboardFilters,
+} from "@/lib/dashboardFiltersStorage";
 import {
   BarChart,
   Bar,
@@ -1131,13 +1136,22 @@ export default function DashboardPage() {
     () => currentMonthRange(),
     []
   );
-  const initialFilters = useMemo(
-    () =>
-      parseReportingFiltersFromSearchParams(
-        new URLSearchParams(safeSearch.toString())
-      ),
+  const hasUrlFilters = useMemo(
+    () => hasAnyReportingFilterParams(safeSearch),
     [safeSearch]
   );
+  const storedFilters = useMemo(
+    () => (hasUrlFilters ? null : loadDashboardFilters()),
+    [hasUrlFilters]
+  );
+  const initialFilters = useMemo(() => {
+    if (hasUrlFilters) {
+      return parseReportingFiltersFromSearchParams(
+        new URLSearchParams(safeSearch.toString())
+      );
+    }
+    return storedFilters ?? {};
+  }, [hasUrlFilters, safeSearch, storedFilters]);
   const [range, setRange] = useState<Range>(() => ({
     from: initialFilters.from
       ? asDate(initialFilters.from) ?? defaultFrom
@@ -1204,6 +1218,7 @@ export default function DashboardPage() {
       initialFilters.leadCreatedTo
     )
   );
+  const isHydratingRef = useRef(false);
 
   const buildFilterState = (
     stateRange: Range,
@@ -1451,6 +1466,40 @@ export default function DashboardPage() {
     const url = nextQuery ? `${safePathname}?${nextQuery}` : safePathname;
     router.replace(url, { scroll: false });
   };
+
+  useEffect(() => {
+    if (isHydratingRef.current) return;
+    if (hasUrlFilters) {
+      isHydratingRef.current = true;
+      return;
+    }
+    if (!storedFilters) {
+      isHydratingRef.current = true;
+      return;
+    }
+    isHydratingRef.current = true;
+    setSources(storedFilters.sources ?? []);
+    setExcludeSources(storedFilters.excludeSources ?? []);
+    syncFiltersToUrl({
+      from: storedFilters.from,
+      to: storedFilters.to,
+      tz: storedFilters.tz ?? tz,
+      setterIds: storedFilters.setterIds ?? [],
+      closerIds: storedFilters.closerIds ?? [],
+      tags: storedFilters.tags ?? [],
+      sources: storedFilters.sources ?? [],
+      excludeSources: storedFilters.excludeSources ?? [],
+      leadCreatedFrom: storedFilters.leadCreatedFrom,
+      leadCreatedTo: storedFilters.leadCreatedTo,
+    });
+  }, [
+    hasUrlFilters,
+    setExcludeSources,
+    setSources,
+    storedFilters,
+    syncFiltersToUrl,
+    tz,
+  ]);
 
   // ========= FUNNEL METRICS (pour les tuiles + Funnel) =========
 const { data: funnelRaw = {}, loading: funnelLoading, error: funnelError } =
@@ -5991,6 +6040,22 @@ function KpiBox({
                     disabled={loading}
                     onClick={() => {
                       if (loading) return;
+                      const nextAppliedFilters: ReportingFilterState = {
+                        from: draftRange.from
+                          ? toISODate(draftRange.from)
+                          : undefined,
+                        to: draftRange.to
+                          ? toISODate(draftRange.to)
+                          : undefined,
+                        tz: draftTz,
+                        setterIds: draftSetterIds,
+                        closerIds: draftCloserIds,
+                        tags: draftTags,
+                        sources,
+                        excludeSources,
+                        leadCreatedFrom: draftLeadCreatedFrom,
+                        leadCreatedTo: draftLeadCreatedTo,
+                      };
                       if (debugFilters) {
                          console.info("[Filters] apply", {
                           previousAppliedState: buildFilterState(range),
@@ -6011,22 +6076,8 @@ function KpiBox({
                     setTags(draftTags);
                     setLeadCreatedFrom(draftLeadCreatedFrom);
                     setLeadCreatedTo(draftLeadCreatedTo);
-                    syncFiltersToUrl({
-                      from: draftRange.from
-                        ? toISODate(draftRange.from)
-                          : undefined,
-                        to: draftRange.to
-                          ? toISODate(draftRange.to)
-                          : undefined,
-                        tz: draftTz,
-                      setterIds: draftSetterIds,
-                      closerIds: draftCloserIds,
-                      tags: draftTags,
-                      sources,
-                      excludeSources,
-                      leadCreatedFrom: draftLeadCreatedFrom,
-                      leadCreatedTo: draftLeadCreatedTo,
-                    });
+                    syncFiltersToUrl(nextAppliedFilters);
+                    saveDashboardFilters(nextAppliedFilters);
                       setFiltersOpen(false);
                       if (debugFilters && typeof window !== "undefined") {
                         setTimeout(() => {
