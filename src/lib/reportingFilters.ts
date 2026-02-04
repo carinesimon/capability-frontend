@@ -62,6 +62,29 @@ export function parseReportingFiltersFromSearchParams(
   };
 }
 
+const REPORTING_FILTER_PARAM_KEYS = [
+  "from",
+  "to",
+  "tz",
+  "setterIdsCsv",
+  "closerIdsCsv",
+  "tagsCsv",
+  "sourcesCsv",
+  "sourcesExcludeCsv",
+  "leadCreatedFrom",
+  "leadCreatedTo",
+  "comparePrev",
+];
+
+export function hasAnyReportingFilterParams(
+  searchParams: URLSearchParams
+): boolean {
+  return REPORTING_FILTER_PARAM_KEYS.some((key) => {
+    const value = searchParams.get(key);
+    return value != null && value !== "";
+  });
+}
+
 export function updateSearchParamsWithReportingFilters(
   searchParams: URLSearchParams,
   filters: ReportingFilterState,
