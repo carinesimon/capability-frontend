@@ -3512,7 +3512,7 @@ function KpiBox({
 
       <div className="mt-4 flex gap-4">
         <Sidebar />
-        <div className="flex-1 space-y-6">
+        <div className="flex-1 space-y-3">
           {err && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               {err}
@@ -4191,7 +4191,7 @@ function KpiBox({
 
           {/* ===== Charts Deck ===== */}
           
-          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
             {/* Leads reçus */}
             {!isPersonFiltered && (
               <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
@@ -4207,7 +4207,7 @@ function KpiBox({
                     au total
                   </div>
                 </div>
-                <div className="h-64 mt-2">
+                <div className="h-48 mt-2">
                   {leadsRcv?.byDay?.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -4321,7 +4321,7 @@ function KpiBox({
                   €
                 </div>
               </div>
-              <div className="h-64 mt-2">
+              <div className="h-48 mt-2">
                 {salesWeekly.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4480,7 +4480,7 @@ function KpiBox({
                   )}
                 </div>
               </div>
-              <div className="h-64 mt-2">
+              <div className="h-48 mt-2">
                 {mCallReq?.byDay?.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4586,7 +4586,7 @@ function KpiBox({
                   </div>
                 </div>
 
-                <div className="h-64 mt-2">
+                <div className="h-48 mt-2">
                   {rv0Daily?.byDay?.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
@@ -4662,7 +4662,7 @@ function KpiBox({
                       .toLocaleString("fr-FR")}
                   </div>
                 </div>
-                <div className="h-64 mt-2">
+                <div className="h-48 mt-2">
                   {rv0NsWeekly.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -4775,93 +4775,94 @@ function KpiBox({
                   <b>date/heure du RDV</b> : chaque barre = lundi → dimanche.
                 </div>
 
-                {/* Annulés / reportés par jour — RV1 & RV2 */}
-                <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">Annulés / reportés par jour (RV1 & RV2)</div>
-                    <div className="text-xs text-[--muted]">
-                      {(canceledDaily?.total ?? 0).toLocaleString("fr-FR")} au total
-                    </div>
-                  </div>
-
-                  <div className="h-64 mt-2">
-                    {canceledDaily?.byDay?.length ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={canceledDaily.byDay}
-                          margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
-                        >
-                          <defs>
-                            {/* RV1 : annulé + reporté */}
-                            <linearGradient id="gradRv1Status" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.95} />
-                              <stop offset="100%" stopColor="#b45309" stopOpacity={0.75} />
-                            </linearGradient>
-                            {/* RV2 : annulé + reporté */}
-                            <linearGradient id="gradRv2Status" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
-                              <stop offset="100%" stopColor="#2563eb" stopOpacity={0.75} />
-                            </linearGradient>
-                          </defs>
-
-                          <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
-
-                          <XAxis
-                            dataKey="day"
-                            type="category"
-                            tick={{ fill: COLORS.axis, fontSize: 12 }}
-                            tickFormatter={(d: string) => {
-                              const [y, m, dd] = d.split("-");
-                              return `${dd}/${m}/${y}`;
-                            }}
-                          />
-
-                          <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
-
-                          <Tooltip
-                            content={
-                              <ProTooltip
-                                title="Annulés / reportés"
-                                valueFormatters={{
-                                  rv1CanceledPostponed: (v) => fmtInt(v),
-                                  rv2CanceledPostponed: (v) => fmtInt(v),
-                                  total: (v) => fmtInt(v),
-                                }}
-                              />
-                            }
-                          />
-                          <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
-
-                          {/* Deux barres côte à côte (pas de stackId) */}
-                          <Bar
-                            name="RV1 annulés + reportés"
-                            dataKey="rv1CanceledPostponed"
-                            fill="url(#gradRv1Status)"
-                            radius={[8, 8, 0, 0]}
-                            maxBarSize={40}
-                          />
-                          <Bar
-                            name="RV2 annulés + reportés"
-                            dataKey="rv2CanceledPostponed"
-                            fill="url(#gradRv2Status)"
-                            radius={[8, 8, 0, 0]}
-                            maxBarSize={40}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-[--muted] text-sm">
-                        Pas de données.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="text-[11px] text-[--muted] mt-2">
-                    Agrégation quotidienne dans le fuseau <b>{tz}</b> · chaque barre combine
-                    <b> annulés + reportés</b> pour RV1 et RV2.
+                </div>
+            )}
+            {/* Annulés / reportés par jour — RV1 & RV2 */}
+            {!isPersonFiltered && (
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">Annulés / reportés par jour (RV1 & RV2)</div>
+                  <div className="text-xs text-[--muted]">
+                    {(canceledDaily?.total ?? 0).toLocaleString("fr-FR")} au total
                   </div>
                 </div>
 
+                <div className="h-48 mt-2">
+                  {canceledDaily?.byDay?.length ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={canceledDaily.byDay}
+                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                      >
+                        <defs>
+                          {/* RV1 : annulé + reporté */}
+                          <linearGradient id="gradRv1Status" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.95} />
+                            <stop offset="100%" stopColor="#b45309" stopOpacity={0.75} />
+                          </linearGradient>
+                          {/* RV2 : annulé + reporté */}
+                          <linearGradient id="gradRv2Status" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
+                            <stop offset="100%" stopColor="#2563eb" stopOpacity={0.75} />
+                          </linearGradient>
+                        </defs>
+
+                        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+
+                        <XAxis
+                          dataKey="day"
+                          type="category"
+                          tick={{ fill: COLORS.axis, fontSize: 12 }}
+                          tickFormatter={(d: string) => {
+                            const [y, m, dd] = d.split("-");
+                            return `${dd}/${m}/${y}`;
+                          }}
+                        />
+
+                        <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
+
+                        <Tooltip
+                          content={
+                            <ProTooltip
+                              title="Annulés / reportés"
+                              valueFormatters={{
+                                rv1CanceledPostponed: (v) => fmtInt(v),
+                                rv2CanceledPostponed: (v) => fmtInt(v),
+                                total: (v) => fmtInt(v),
+                              }}
+                            />
+                          }
+                        />
+                        <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+
+                        {/* Deux barres côte à côte (pas de stackId) */}
+                        <Bar
+                          name="RV1 annulés + reportés"
+                          dataKey="rv1CanceledPostponed"
+                          fill="url(#gradRv1Status)"
+                          radius={[8, 8, 0, 0]}
+                          maxBarSize={40}
+                        />
+                        <Bar
+                          name="RV2 annulés + reportés"
+                          dataKey="rv2CanceledPostponed"
+                          fill="url(#gradRv2Status)"
+                          radius={[8, 8, 0, 0]}
+                          maxBarSize={40}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-[--muted] text-sm">
+                      Pas de données.
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-[--muted] mt-2">
+                  Agrégation quotidienne dans le fuseau <b>{tz}</b> · chaque barre combine
+                  <b> annulés + reportés</b> pour RV1 et RV2.
+                </div>
               </div>
             )}
           </div>
