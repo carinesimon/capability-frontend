@@ -4654,6 +4654,7 @@ function KpiBox({
                                   leadsSeries.data.length
                                 )
                               : "preserveStartEnd"
+                              }
                           tick={{
                             fill: COLORS.axis,
                             fontSize: 12,
