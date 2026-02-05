@@ -1607,6 +1607,7 @@ export default function DashboardPage() {
     () => getRangeDaysInclusive(fromISO, toISO),
     [fromISO, toISO]
   );
+  const isCompact = (rangeDays ?? 0) > 31;
   const seriesGranularity = useMemo(
     () => getSeriesGranularity(rangeDays),
     [rangeDays]
@@ -1617,6 +1618,15 @@ export default function DashboardPage() {
       : seriesGranularity === "week"
         ? "semaine"
         : "mois";
+  const chartHeightClass = isCompact ? "h-48" : "h-64";
+  const chartSpacingClass = isCompact ? "mt-1" : "mt-2";
+  const chartFooterSpacingClass = isCompact ? "mt-1" : "mt-2";
+  const chartMargin = isCompact
+    ? { top: 8, right: 12, left: 8, bottom: 8 }
+    : { left: 8, right: 8, top: 10, bottom: 0 };
+  const legendWrapperStyle = isCompact
+    ? { color: "#fff", opacity: 0.8, fontSize: 10 }
+    : { color: "#fff", opacity: 0.8 };
   const salesGranularity =
     seriesGranularity === "month" ? "month" : "week";
   const normalizedSetterIds = useMemo(
@@ -4539,10 +4549,14 @@ function KpiBox({
 
           {/* ===== Charts Deck ===== */}
           
-          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div
+            className={`grid grid-cols-1 xl:grid-cols-2 ${isCompact ? "mt-3 gap-3" : "mt-4 gap-4"}`}
+          >
             {/* Leads reçus */}
             {!isPersonFiltered && (
-              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div
+                className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
+              >
                 <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
@@ -4556,7 +4570,9 @@ function KpiBox({
                     au total
                   </div>
                 </div>
-                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                <div
+                  className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
+                >
                   {leadsSeries.points.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -4564,12 +4580,7 @@ function KpiBox({
                     >
                       <BarChart
                         data={leadsSeries.points}
-                        margin={{
-                          left: 8,
-                          right: 8,
-                          top: 10,
-                          bottom: 0,
-                        }}
+                        margin={chartMargin}
                       >
                         <defs>
                           <linearGradient
@@ -4621,12 +4632,11 @@ function KpiBox({
                             />
                           }
                         />
-                        <Legend
-                          wrapperStyle={{
-                            color: "#fff",
-                            opacity: 0.8,
-                          }}
-                        />
+                        {!isCompact && (
+                          <Legend
+                            wrapperStyle={legendWrapperStyle}
+                          />
+                        )}
                         <Bar
                           name="Leads"
                           dataKey="count"
@@ -4642,7 +4652,9 @@ function KpiBox({
                     </div>
                   )}
                 </div>
-                <div className="text-[11px] text-[--muted] mt-2">
+                <div
+                  className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
+                >
                   Basé sur la <b>date de création</b> du contact
                   {focusScopeSuffix || ""}.
                 </div>
@@ -4650,7 +4662,9 @@ function KpiBox({
             )}
 
             {/* CA hebdo (WON) */}
-            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+            <div
+              className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
+            >
               <div className="absolute -left-16 -top-10 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
               <div className="flex items-center justify-between">
                 <div className="font-medium">
@@ -4667,7 +4681,9 @@ function KpiBox({
                   €
                 </div>
               </div>
-              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+              <div
+                className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
+              >
                 {salesAggregated.points.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4675,12 +4691,7 @@ function KpiBox({
                   >
                     <BarChart
                       data={salesAggregated.points}
-                      margin={{
-                        left: 8,
-                        right: 8,
-                        top: 10,
-                        bottom: 0,
-                      }}
+                      margin={chartMargin}
                     >
                       <defs>
                         <linearGradient
@@ -4761,10 +4772,7 @@ function KpiBox({
                         }
                       />
                       <Legend
-                        wrapperStyle={{
-                          color: "#fff",
-                          opacity: 0.8,
-                        }}
+                        wrapperStyle={legendWrapperStyle}
                       />
                       <Bar
                         yAxisId="left"
@@ -4790,14 +4798,18 @@ function KpiBox({
                   </div>
                 )}
               </div>
-              <div className="text-[11px] text-[--muted] mt-2">
+              <div
+                className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
+              >
                 Basé sur la{" "}
                 <b>date de passage en WON</b>.
               </div>
             </div>
 
             {/* Call requests */}
-            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+            <div
+              className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
+            >
               <div className="flex items-center justify-between">
                 <div className="font-medium">
                   Demandes d’appel par {seriesGranularityLabel}
@@ -4808,7 +4820,9 @@ function KpiBox({
                   )}
                 </div>
               </div>
-              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+              <div
+                className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
+              >
                 {callReqSeries.points.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4816,12 +4830,7 @@ function KpiBox({
                   >
                     <BarChart
                       data={callReqSeries.points}
-                      margin={{
-                        left: 8,
-                        right: 8,
-                        top: 10,
-                        bottom: 0,
-                      }}
+                      margin={chartMargin}
                     >
                       <defs>
                         <linearGradient
@@ -4873,12 +4882,11 @@ function KpiBox({
                           />
                         }
                       />
-                      <Legend
-                        wrapperStyle={{
-                          color: "#fff",
-                          opacity: 0.8,
-                        }}
-                      />
+                      {!isCompact && (
+                        <Legend
+                          wrapperStyle={legendWrapperStyle}
+                        />
+                      )}
                       <Bar
                         name="Demandes"
                         dataKey="count"
@@ -4894,7 +4902,9 @@ function KpiBox({
                   </div>
                 )}
               </div>
-              <div className="text-[11px] text-[--muted] mt-2">
+              <div
+                className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
+              >
                 Basé sur{" "}
                 <b>CallRequest.requestedAt</b>.
               </div>
@@ -4902,7 +4912,9 @@ function KpiBox({
 
             {/* RV0 faits par jour */}
             {!isCloserFiltered && (
-              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div
+                className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
+              >
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
                     RV0 faits par {seriesGranularityLabel}
@@ -4915,12 +4927,14 @@ function KpiBox({
                   </div>
                 </div>
 
-                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                <div
+                  className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
+                >
                   {rv0HonoredSeries.points.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={rv0HonoredSeries.points}
-                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                        margin={chartMargin}
                       >
                         <defs>
                           <linearGradient id="gradRv0Done" x1="0" y1="0" x2="0" y2="1">
@@ -4949,7 +4963,11 @@ function KpiBox({
                             />
                           }
                         />
-                        <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+                        {!isCompact && (
+                          <Legend
+                            wrapperStyle={legendWrapperStyle}
+                          />
+                        )}
                         <Bar
                           name="RV0 faits"
                           dataKey="count"
@@ -4966,7 +4984,9 @@ function KpiBox({
                   )}
                 </div>
 
-                <div className="text-[11px] text-[--muted] mt-2">
+                <div
+                  className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
+                >
                   Basé sur les <b>StageEvents RV0_HONORED</b> (date de RDV).
                 </div>
               </div>
@@ -4975,7 +4995,9 @@ function KpiBox({
 
             {/* RV0 no-show weekly */}
             {!isPersonFiltered && (
-              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+              <div
+                className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl xl:col-span-2 ${isCompact ? "p-3" : "p-4"}`}
+              >
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
                     RV0 no-show par {seriesGranularityLabel}
@@ -4984,7 +5006,9 @@ function KpiBox({
                     {(rv0NoShowAggregated.total || 0).toLocaleString("fr-FR")}
                   </div>
                 </div>
-                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                <div
+                  className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
+                >
                   {rv0NoShowAggregated.points.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -4992,12 +5016,7 @@ function KpiBox({
                     >
                       <BarChart
                         data={rv0NoShowAggregated.points}
-                        margin={{
-                          left: 8,
-                          right: 8,
-                          top: 10,
-                          bottom: 0,
-                        }}
+                        margin={chartMargin}
                       >
                         <defs>
                           <linearGradient
@@ -5049,16 +5068,14 @@ function KpiBox({
                             />
                           }
                         />
-                        <Legend
-                          wrapperStyle={{
-                            color: "#fff",
-                            opacity: 0.8,
-                          }}
-                        />
+                        {!isCompact && (
+                          <Legend
+                            wrapperStyle={legendWrapperStyle}
+                          />
+                        )}
                         <Bar
                           name="RV0 no-show"
                           dataKey="count"
-                          fill="url(#gradRv0Ns)"
                           radius={[8, 8, 0, 0]}
                           maxBarSize={44}
                           onClick={(d: any) => {
@@ -5085,7 +5102,9 @@ function KpiBox({
                     </div>
                   )}
                 </div>
-                <div className="text-[11px] text-[--muted] mt-2">
+                <div
+                  className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
+                >
                   Compté sur la{" "}
                   <b>date/heure du RDV</b> : chaque barre ={" "}
                   {seriesGranularity === "week"
@@ -5095,7 +5114,9 @@ function KpiBox({
                 </div>
 
                 {/* Annulés / reportés par jour — RV1 & RV2 */}
-                <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+                <div
+                  className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl xl:col-span-2 ${isCompact ? "p-3" : "p-4"}`}
+                >
                   <div className="flex items-center justify-between">
                     <div className="font-medium">
                       Annulés / reportés par {seriesGranularityLabel} (RV1 & RV2)
@@ -5105,15 +5126,17 @@ function KpiBox({
                         "fr-FR"
                       )}{" "}
                       au total
-                    </div>
+                     </div>
                   </div>
 
-                  <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                  <div
+                    className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
+                  >
                     {canceledAggregated.points.length ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={canceledAggregated.points}
-                          margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                          margin={chartMargin}
                         >
                           <defs>
                             {/* RV1 : annulé + reporté */}
@@ -5151,7 +5174,9 @@ function KpiBox({
                               />
                             }
                           />
-                          <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+                          <Legend
+                            wrapperStyle={legendWrapperStyle}
+                          />
 
                           {/* Deux barres côte à côte (pas de stackId) */}
                           <Bar
@@ -5177,7 +5202,9 @@ function KpiBox({
                     )}
                   </div>
 
-                  <div className="text-[11px] text-[--muted] mt-2">
+                  <div
+                    className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
+                  >
                     Agrégation{" "}
                     {seriesGranularity === "day"
                       ? "quotidienne"
@@ -6440,3 +6467,4 @@ function KpiBox({
   );
   
 }
+
