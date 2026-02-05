@@ -309,6 +309,9 @@ function toISODate(d: Date | string) {
   const day = String(dd.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+function toISODateUTC(d: Date) {
+  return toISOFromParts(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
 function deriveLeadCreatedMode(
   from?: string,
   to?: string
@@ -322,10 +325,257 @@ const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
 const fmtPct = (num?: number | null, den?: number | null) =>
   den && den > 0 ? `${Math.round(((num || 0) / den) * 100)}%` : "—";
 
+type Granularity = "day" | "week" | "month" | "year";
+type Bucket = {
+  key: string;
+  label: string;
+  value: number;
+  startISO: string;
+  endISO: string;
+  values?: Record<string, number>;
+  meta?: { week?: number; year?: number; month?: number };
+};
+
+const MAX_POINTS_BY_GRANULARITY: Record<Granularity, number> = {
+  day: 31,
+  week: 16,
+  month: 12,
+  year: 10,
+};
+
+const MS_PER_DAY = 86_400_000;
+
+function parseISODateParts(iso: string) {
+  const [y, m, d] = iso.split("-").map((v) => Number(v));
+  if (!y || !m || !d) return null;
+  return { year: y, month: m, day: d };
+}
+
+function toISOFromParts(year: number, month: number, day: number) {
+  const m = String(month).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${year}-${m}-${d}`;
+}
+
+function dateFromPartsUTC(parts: { year: number; month: number; day: number }) {
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+}
+
+function addDaysUTC(date: Date, days: number) {
+  return new Date(date.getTime() + days * MS_PER_DAY);
+}
+
+function calculateRangeDays(fromISO?: string, toISO?: string) {
+  if (!fromISO || !toISO) return 0;
+  const fromParts = parseISODateParts(fromISO);
+  const toParts = parseISODateParts(toISO);
+  if (!fromParts || !toParts) return 0;
+  const fromDate = dateFromPartsUTC(fromParts);
+  const toDate = dateFromPartsUTC(toParts);
+  const diffDays = Math.floor((toDate.getTime() - fromDate.getTime()) / MS_PER_DAY);
+  return diffDays + 1;
+}
+
+function resolveGranularity(rangeDays: number): Granularity {
+  if (rangeDays <= 31) return "day";
+  if (rangeDays <= 120) return "week";
+  if (rangeDays <= 900) return "month";
+  return "year";
+}
+
+function formatDayLabel(iso: string, withYear: boolean) {
+  const parts = parseISODateParts(iso);
+  if (!parts) return iso;
+  const day = String(parts.day).padStart(2, "0");
+  const month = String(parts.month).padStart(2, "0");
+  if (!withYear) return `${day}/${month}`;
+  return `${day}/${month}/${parts.year}`;
+}
+
+function formatMonthLabel(year: number, month: number, tz?: string) {
+  const date = new Date(Date.UTC(year, month - 1, 15, 12));
+  const label = date.toLocaleDateString("fr-FR", {
+    month: "short",
+    timeZone: tz ?? "Europe/Paris",
+  });
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${year}`;
+}
+
+function getISOWeekInfo(date: Date) {
+  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNr = (target.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+  const weekYear = target.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(weekYear, 0, 4));
+  const firstDayNr = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNr + 3);
+  const weekNumber =
+    1 + Math.round((target.getTime() - firstThursday.getTime()) / (7 * MS_PER_DAY));
+  const weekStart = addDaysUTC(target, -3);
+  const weekEnd = addDaysUTC(weekStart, 6);
+  return { weekNumber, weekYear, weekStart, weekEnd };
+}
+
+function buildBucketLabel(
+  bucket: Bucket,
+  granularity: Granularity,
+  includeWeekYear: boolean,
+  tz?: string
+) {
+  if (granularity === "day") {
+    return formatDayLabel(bucket.startISO, false);
+  }
+  if (granularity === "week") {
+    const week = String(bucket.meta?.week ?? 0).padStart(2, "0");
+    return includeWeekYear ? `S${week} ${bucket.meta?.year ?? ""}` : `S${week}`;
+  }
+  if (granularity === "month") {
+    const year = bucket.meta?.year ?? Number(bucket.startISO.slice(0, 4));
+    const month = bucket.meta?.month ?? Number(bucket.startISO.slice(5, 7));
+    return formatMonthLabel(year, month, tz);
+  }
+  return String(bucket.meta?.year ?? bucket.startISO.slice(0, 4));
+}
+
+function formatBucketNote(bucket: Bucket, granularity: Granularity, tz?: string) {
+  if (granularity === "day") {
+    return formatDayLabel(bucket.startISO, true);
+  }
+  if (granularity === "week") {
+    const week = String(bucket.meta?.week ?? 0).padStart(2, "0");
+    return `S${week} ${bucket.meta?.year ?? ""}`;
+  }
+  if (granularity === "month") {
+    const year = bucket.meta?.year ?? Number(bucket.startISO.slice(0, 4));
+    const month = bucket.meta?.month ?? Number(bucket.startISO.slice(5, 7));
+    return formatMonthLabel(year, month, tz);
+  }
+  return String(bucket.meta?.year ?? bucket.startISO.slice(0, 4));
+}
+
+function getNumericValue(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function bucketSeries<T extends { day?: string | null }>(
+  points: T[] | null | undefined,
+  granularity: Granularity,
+  tz: string | undefined,
+  options: { valueKeys: string[] }
+): Bucket[] {
+  const rows = points ?? [];
+  const map = new Map<string, Bucket>();
+  for (const row of rows) {
+    const rawDay = row?.day;
+    if (!rawDay || typeof rawDay !== "string") continue;
+    const dayISO = rawDay.length >= 10 ? rawDay.slice(0, 10) : rawDay;
+    const parts = parseISODateParts(dayISO);
+    if (!parts) continue;
+    const dateUTC = dateFromPartsUTC(parts);
+
+    let key = dayISO;
+    let startISO = dayISO;
+    let endISO = dayISO;
+    let meta: Bucket["meta"] = {};
+
+    if (granularity === "week") {
+      const { weekNumber, weekYear, weekStart, weekEnd } = getISOWeekInfo(dateUTC);
+      key = `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
+      startISO = toISODateUTC(weekStart);
+      endISO = toISODateUTC(weekEnd);
+      meta = { week: weekNumber, year: weekYear };
+    } else if (granularity === "month") {
+      key = `${parts.year}-${String(parts.month).padStart(2, "0")}`;
+      startISO = toISOFromParts(parts.year, parts.month, 1);
+      const endDate = new Date(Date.UTC(parts.year, parts.month, 0));
+      endISO = toISODateUTC(endDate);
+      meta = { month: parts.month, year: parts.year };
+    } else if (granularity === "year") {
+      key = `${parts.year}`;
+      startISO = toISOFromParts(parts.year, 1, 1);
+      endISO = toISOFromParts(parts.year, 12, 31);
+      meta = { year: parts.year };
+    }
+
+    const bucket = map.get(key);
+    const nextValues: Record<string, number> = bucket?.values
+      ? { ...bucket.values }
+      : {};
+    for (const valueKey of options.valueKeys) {
+      const rawValue = (row as Record<string, unknown>)[valueKey];
+      nextValues[valueKey] = (nextValues[valueKey] ?? 0) + getNumericValue(rawValue);
+    }
+    const nextValue = Object.values(nextValues).reduce((sum, val) => sum + val, 0);
+    map.set(key, {
+      key,
+      label: "",
+      value: nextValue,
+      startISO,
+      endISO,
+      values: nextValues,
+      meta,
+    });
+  }
+
+  const buckets = [...map.values()].sort((a, b) => a.startISO.localeCompare(b.startISO));
+  const includeWeekYear =
+    granularity === "week" &&
+    new Set(buckets.map((bucket) => bucket.meta?.year)).size > 1;
+  return buckets.map((bucket) => ({
+    ...bucket,
+    label: buildBucketLabel(bucket, granularity, includeWeekYear, tz),
+  }));
+}
+
+function trimEmptyStart(buckets: Bucket[]) {
+  let trimmedCount = 0;
+  let firstNonEmpty: Bucket | undefined;
+  for (const bucket of buckets) {
+    if (bucket.value !== 0) {
+      firstNonEmpty = bucket;
+      break;
+    }
+    trimmedCount += 1;
+  }
+  if (!trimmedCount) {
+    return { buckets, trimmedCount: 0, firstNonEmpty: buckets[0] };
+  }
+  return {
+    buckets: buckets.slice(trimmedCount),
+    trimmedCount,
+    firstNonEmpty,
+  };
+}
+
+function capPoints(buckets: Bucket[], maxPoints: number) {
+  if (buckets.length <= maxPoints || maxPoints <= 0) return buckets;
+  if (maxPoints === 1) return [buckets[0]];
+  if (maxPoints === 2) return [buckets[0], buckets[buckets.length - 1]];
+
+  const result: Bucket[] = [buckets[0]];
+  const innerCount = maxPoints - 2;
+  const step = Math.ceil((buckets.length - 2) / innerCount);
+  for (let i = 1; i < buckets.length - 1; i += step) {
+    result.push(buckets[i]);
+  }
+  result.push(buckets[buckets.length - 1]);
+  return result;
+}
+
+function getDayInterval(length: number) {
+  if (length <= 7) return 0;
+  if (length <= 14) return 1;
+  if (length <= 21) return 2;
+  if (length <= 28) return 3;
+  return 4;
+}
+
 const EMPTY_METRIC_SERIES: MetricSeriesOut = {
   total: 0,
   byDay: [],
 };
+
 
 const mergeMetricSeries = (seriesList: MetricSeriesOut[]) => {
   const map = new Map<string, number>();
@@ -1252,6 +1502,14 @@ export default function DashboardPage() {
   const toDate = useMemo(
     () => asDate(range.to) ?? new Date(),
     [range.to]
+  );
+  const rangeDays = useMemo(
+    () => calculateRangeDays(fromISO, toISO),
+    [fromISO, toISO]
+  );
+  const granularity = useMemo(
+    () => resolveGranularity(rangeDays),
+    [rangeDays]
   );
   const normalizedSetterIds = useMemo(
     () => normalizeFilterValues(setterIds),
@@ -3371,6 +3629,88 @@ function KpiBox({
   }
 };
 
+  const leadsSeries = useMemo(() => {
+    const buckets = bucketSeries(leadsRcv?.byDay, granularity, tz, {
+      valueKeys: ["count"],
+    });
+    const trimmed = trimEmptyStart(buckets);
+    const capped = capPoints(
+      trimmed.buckets,
+      MAX_POINTS_BY_GRANULARITY[granularity]
+    );
+    return {
+      data: capped.map((bucket) => ({
+        label: bucket.label,
+        count: bucket.values?.count ?? bucket.value,
+      })),
+      trimmedFrom: trimmed.firstNonEmpty,
+      trimmedCount: trimmed.trimmedCount,
+    };
+  }, [leadsRcv, granularity, tz]);
+
+  const callReqSeries = useMemo(() => {
+    const buckets = bucketSeries(mCallReq?.byDay, granularity, tz, {
+      valueKeys: ["count"],
+    });
+    const trimmed = trimEmptyStart(buckets);
+    const capped = capPoints(
+      trimmed.buckets,
+      MAX_POINTS_BY_GRANULARITY[granularity]
+    );
+    return {
+      data: capped.map((bucket) => ({
+        label: bucket.label,
+        count: bucket.values?.count ?? bucket.value,
+      })),
+      trimmedFrom: trimmed.firstNonEmpty,
+      trimmedCount: trimmed.trimmedCount,
+    };
+  }, [mCallReq, granularity, tz]);
+
+  const rv0Series = useMemo(() => {
+    const buckets = bucketSeries(rv0Daily?.byDay, granularity, tz, {
+      valueKeys: ["count"],
+    });
+    const trimmed = trimEmptyStart(buckets);
+    const capped = capPoints(
+      trimmed.buckets,
+      MAX_POINTS_BY_GRANULARITY[granularity]
+    );
+    return {
+      data: capped.map((bucket) => ({
+        label: bucket.label,
+        count: bucket.values?.count ?? bucket.value,
+      })),
+      trimmedFrom: trimmed.firstNonEmpty,
+      trimmedCount: trimmed.trimmedCount,
+    };
+  }, [rv0Daily, granularity, tz]);
+
+  const canceledSeries = useMemo(() => {
+    const buckets = bucketSeries(canceledDaily?.byDay, granularity, tz, {
+      valueKeys: ["rv1CanceledPostponed", "rv2CanceledPostponed"],
+    });
+    const trimmed = trimEmptyStart(buckets);
+    const capped = capPoints(
+      trimmed.buckets,
+      MAX_POINTS_BY_GRANULARITY[granularity]
+    );
+    return {
+      data: capped.map((bucket) => ({
+        label: bucket.label,
+        rv1CanceledPostponed:
+          bucket.values?.rv1CanceledPostponed ?? 0,
+        rv2CanceledPostponed:
+          bucket.values?.rv2CanceledPostponed ?? 0,
+        total:
+          (bucket.values?.rv1CanceledPostponed ?? 0) +
+          (bucket.values?.rv2CanceledPostponed ?? 0),
+      })),
+      trimmedFrom: trimmed.firstNonEmpty,
+      trimmedCount: trimmed.trimmedCount,
+    };
+  }, [canceledDaily, granularity, tz]);
+
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center text-[--muted]">
@@ -4208,18 +4548,13 @@ function KpiBox({
                   </div>
                 </div>
                 <div className="h-48 mt-2">
-                  {leadsRcv?.byDay?.length ? (
+                  {leadsSeries.data.length ? (
                     <ResponsiveContainer
                       width="100%"
                       height="100%"
                     >
                       <BarChart
-                        data={leadsRcv.byDay.map((d) => ({
-                          day: new Date(
-                            d.day
-                          ).toLocaleDateString("fr-FR"),
-                          count: d.count,
-                        }))}
+                        data={leadsSeries.data}
                         margin={{
                           left: 8,
                           right: 8,
@@ -4252,7 +4587,14 @@ function KpiBox({
                           stroke={COLORS.grid}
                         />
                         <XAxis
-                          dataKey="day"
+                          dataKey="label"
+                          interval={
+                            granularity === "day"
+                              ? getDayInterval(
+                                  leadsSeries.data.length
+                                )
+                              : "preserveStartEnd"
+                          }
                           tick={{
                             fill: COLORS.axis,
                             fontSize: 12,
@@ -4297,6 +4639,20 @@ function KpiBox({
                     </div>
                   )}
                 </div>
+                {leadsSeries.trimmedCount > 0 &&
+                  leadsSeries.trimmedFrom && (
+                    <div className="text-[11px] text-[--muted] mt-1">
+                      Affichage depuis{" "}
+                      <b>
+                        {formatBucketNote(
+                          leadsSeries.trimmedFrom,
+                          granularity,
+                          tz
+                        )}
+                      </b>
+                      .
+                    </div>
+                  )}
                 <div className="text-[11px] text-[--muted] mt-2">
                   Basé sur la <b>date de création</b> du contact
                   {focusScopeSuffix || ""}.
@@ -4481,18 +4837,13 @@ function KpiBox({
                 </div>
               </div>
               <div className="h-48 mt-2">
-                {mCallReq?.byDay?.length ? (
+                {callReqSeries.data.length ? (
                   <ResponsiveContainer
                     width="100%"
                     height="100%"
                   >
                     <BarChart
-                      data={mCallReq.byDay.map((d) => ({
-                        day: new Date(
-                          d.day
-                        ).toLocaleDateString("fr-FR"),
-                        count: d.count,
-                      }))}
+                      data={callReqSeries.data}
                       margin={{
                         left: 8,
                         right: 8,
@@ -4525,7 +4876,14 @@ function KpiBox({
                         stroke={COLORS.grid}
                       />
                       <XAxis
-                        dataKey="day"
+                        dataKey="label"
+                        interval={
+                          granularity === "day"
+                            ? getDayInterval(
+                                callReqSeries.data.length
+                              )
+                            : "preserveStartEnd"
+                        }
                         tick={{
                           fill: COLORS.axis,
                           fontSize: 12,
@@ -4570,6 +4928,20 @@ function KpiBox({
                   </div>
                 )}
               </div>
+              {callReqSeries.trimmedCount > 0 &&
+                callReqSeries.trimmedFrom && (
+                  <div className="text-[11px] text-[--muted] mt-1">
+                    Affichage depuis{" "}
+                    <b>
+                      {formatBucketNote(
+                        callReqSeries.trimmedFrom,
+                        granularity,
+                        tz
+                      )}
+                    </b>
+                    .
+                  </div>
+                )}
               <div className="text-[11px] text-[--muted] mt-2">
                 Basé sur{" "}
                 <b>CallRequest.requestedAt</b>.
@@ -4587,13 +4959,10 @@ function KpiBox({
                 </div>
 
                 <div className="h-48 mt-2">
-                  {rv0Daily?.byDay?.length ? (
+                  {rv0Series.data.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={rv0Daily.byDay.map((d) => ({
-                          day: new Date(d.day).toLocaleDateString("fr-FR"),
-                          count: d.count,
-                        }))}
+                        data={rv0Series.data}
                         margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
                       >
                         <defs>
@@ -4605,7 +4974,14 @@ function KpiBox({
 
                         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
                         <XAxis
-                          dataKey="day"
+                          dataKey="label"
+                          interval={
+                            granularity === "day"
+                              ? getDayInterval(
+                                  rv0Series.data.length
+                                )
+                              : "preserveStartEnd"
+                          }
                           tick={{ fill: COLORS.axis, fontSize: 12 }}
                         />
                         <YAxis
@@ -4638,6 +5014,21 @@ function KpiBox({
                     </div>
                   )}
                 </div>
+                {rv0Series.trimmedCount > 0 &&
+                  rv0Series.trimmedFrom && (
+                    <div className="text-[11px] text-[--muted] mt-1">
+                      Affichage depuis{" "}
+                      <b>
+                        {formatBucketNote(
+                          rv0Series.trimmedFrom,
+                          granularity,
+                          tz
+                        )}
+                      </b>
+                      .
+                    </div>
+                  )}
+
 
                 <div className="text-[11px] text-[--muted] mt-2">
                   Basé sur les <b>StageEvents RV0_HONORED</b> (date de RDV).
@@ -4663,19 +5054,11 @@ function KpiBox({
                   </div>
                 </div>
                 <div className="h-48 mt-2">
-                  {rv0NsWeekly.length ? (
-                    <ResponsiveContainer
-                      width="100%"
-                      height="100%"
-                    >
+                  {canceledSeries.data.length ? (
+                    <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={rv0NsWeekly}
-                        margin={{
-                          left: 8,
-                          right: 8,
-                          top: 10,
-                          bottom: 0,
-                        }}
+                        data={canceledSeries.data}
+                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
                       >
                         <defs>
                           <linearGradient
@@ -4810,13 +5193,16 @@ function KpiBox({
                         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
 
                         <XAxis
-                          dataKey="day"
+                          dataKey="label"
                           type="category"
+                          interval={
+                            granularity === "day"
+                              ? getDayInterval(
+                                  canceledSeries.data.length
+                                )
+                              : "preserveStartEnd"
+                          }
                           tick={{ fill: COLORS.axis, fontSize: 12 }}
-                          tickFormatter={(d: string) => {
-                            const [y, m, dd] = d.split("-");
-                            return `${dd}/${m}/${y}`;
-                          }}
                         />
 
                         <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
@@ -4858,6 +5244,20 @@ function KpiBox({
                     </div>
                   )}
                 </div>
+                {canceledSeries.trimmedCount > 0 &&
+                  canceledSeries.trimmedFrom && (
+                    <div className="text-[11px] text-[--muted] mt-1">
+                      Affichage depuis{" "}
+                      <b>
+                        {formatBucketNote(
+                          canceledSeries.trimmedFrom,
+                          granularity,
+                          tz
+                        )}
+                      </b>
+                      .
+                    </div>
+                  )}
 
                 <div className="text-[11px] text-[--muted] mt-2">
                   Agrégation quotidienne dans le fuseau <b>{tz}</b> · chaque barre combine
