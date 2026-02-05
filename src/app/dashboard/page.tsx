@@ -465,11 +465,11 @@ function getBarChartPreset(
   granularity: Granularity,
   pointsCount: number
 ): BarChartPreset {
-  if (granularity !== "day") {
+   if (granularity !== "day") {
     return {
-      barCategoryGap: "5%",
+      barCategoryGap: 0,
       barGap: 0,
-      barSize: 4,
+      barSize: 6,
       maxBarSize: 10,
       xAxisPadding: { left: 0, right: 0 },
     };
