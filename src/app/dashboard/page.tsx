@@ -5,7 +5,7 @@ import type { AxiosRequestConfig } from "axios";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
-import { currentMonthRange, toISODateInTz } from "@/lib/date";
+import { currentMonthRange } from "@/lib/date";
 import Sidebar from "@/components/Sidebar";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 
@@ -321,356 +321,6 @@ const fmtInt = (n: number) => Math.round(n).toLocaleString("fr-FR");
 const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
 const fmtPct = (num?: number | null, den?: number | null) =>
   den && den > 0 ? `${Math.round(((num || 0) / den) * 100)}%` : "—";
-
-type SeriesGranularity = "day" | "week" | "month";
-type AggregatedCountPoint = {
-  key: string;
-  label: string;
-  count: number;
-  from: string;
-  to: string;
-};
-type AggregatedCountSeries = {
-  total: number;
-  points: AggregatedCountPoint[];
-  granularity: SeriesGranularity;
-};
-type AggregatedCanceledPoint = {
-  key: string;
-  label: string;
-  rv1CanceledPostponed: number;
-  rv2CanceledPostponed: number;
-  total: number;
-  from: string;
-  to: string;
-};
-type AggregatedCanceledSeries = {
-  total: number;
-  points: AggregatedCanceledPoint[];
-  granularity: SeriesGranularity;
-};
-type AggregatedSalesPoint = {
-  key: string;
-  label: string;
-  revenue: number;
-  count: number;
-  from: string;
-  to: string;
-};
-type AggregatedSalesSeries = {
-  totalRevenue: number;
-  totalCount: number;
-  points: AggregatedSalesPoint[];
-  granularity: "week" | "month";
-};
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-const parseIsoDateUtc = (iso: string) => {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d, 12));
-};
-
-const toIsoDate = (date: Date) => date.toISOString().slice(0, 10);
-
-const toTzIsoDate = (value: string, tz: string) => {
-  if (!value) return "";
-  const iso = toISODateInTz(value, tz);
-  if (iso) return iso;
-  if (value.length >= 10) return value.slice(0, 10);
-  const fallback = new Date(value);
-  if (Number.isNaN(fallback.getTime())) return "";
-  return toISODateInTz(fallback, tz);
-};
-
-const formatShortDayLabel = (iso: string, tz: string) =>
-  new Intl.DateTimeFormat("fr-FR", {
-    timeZone: tz,
-    day: "2-digit",
-    month: "2-digit",
-  }).format(parseIsoDateUtc(iso));
-
-const formatMonthLabel = (iso: string, tz: string) =>
-  new Intl.DateTimeFormat("fr-FR", {
-    timeZone: tz,
-    month: "short",
-    year: "numeric",
-  }).format(parseIsoDateUtc(iso));
-
-const startOfIsoWeek = (iso: string) => {
-  const date = parseIsoDateUtc(iso);
-  const day = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - day);
-  return date;
-};
-
-const endOfIsoWeek = (start: Date) => {
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 6);
-  return end;
-};
-
-const getIsoWeekNumber = (date: Date) => {
-  const temp = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-  );
-  const dayNum = temp.getUTCDay() || 7;
-  temp.setUTCDate(temp.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(temp.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(
-    ((temp.getTime() - yearStart.getTime()) / DAY_MS + 1) / 7
-  );
-  return weekNo;
-};
-
-const getRangeDaysInclusive = (fromISO?: string, toISO?: string) => {
-  if (!fromISO || !toISO) return null;
-  const start = parseIsoDateUtc(fromISO);
-  const end = parseIsoDateUtc(toISO);
-  const diff = Math.round((end.getTime() - start.getTime()) / DAY_MS);
-  return diff + 1;
-};
-
-const getSeriesGranularity = (
-  rangeDays: number | null
-): SeriesGranularity => {
-  if (!rangeDays) return "day";
-  if (rangeDays <= 31) return "day";
-  if (rangeDays <= 120) return "week";
-  return "month";
-};
-
-const getTickInterval = (count: number) => {
-  if (count > 40) return Math.ceil(count / 12);
-  if (count > 20) return 1;
-  return 0;
-};
-
-const aggregateCountSeries = (
-  series: MetricSeriesOut | null | undefined,
-  granularity: SeriesGranularity,
-  tz: string
-): AggregatedCountSeries => {
-  const byDay = series?.byDay ?? [];
-  if (!byDay.length) {
-    return {
-      total: series?.total ?? 0,
-      points: [],
-      granularity,
-    };
-  }
-  if (granularity === "day") {
-    const points = byDay
-      .map((entry) => {
-        const iso = toTzIsoDate(entry.day, tz);
-        if (!iso) return null;
-        return {
-          key: iso,
-          label: formatShortDayLabel(iso, tz),
-          count: Number(entry.count || 0),
-          from: iso,
-          to: iso,
-        };
-      })
-      .filter(Boolean) as AggregatedCountPoint[];
-    points.sort((a, b) => a.key.localeCompare(b.key));
-    const total = points.reduce((sum, row) => sum + row.count, 0);
-    return { total, points, granularity };
-  }
-  if (granularity === "week") {
-    const map = new Map<string, AggregatedCountPoint>();
-    for (const entry of byDay) {
-      const iso = toTzIsoDate(entry.day, tz);
-      if (!iso) continue;
-      const weekStart = startOfIsoWeek(iso);
-      const weekEnd = endOfIsoWeek(weekStart);
-      const key = toIsoDate(weekStart);
-      const label = `S${String(getIsoWeekNumber(weekStart)).padStart(2, "0")}`;
-      const row = map.get(key) ?? {
-        key,
-        label,
-        count: 0,
-        from: key,
-        to: toIsoDate(weekEnd),
-      };
-      row.count += Number(entry.count || 0);
-      map.set(key, row);
-    }
-    const points = Array.from(map.values()).sort((a, b) =>
-      a.key.localeCompare(b.key)
-    );
-    const total = points.reduce((sum, row) => sum + row.count, 0);
-    return { total, points, granularity };
-  }
-  const map = new Map<string, AggregatedCountPoint>();
-  for (const entry of byDay) {
-    const iso = toTzIsoDate(entry.day, tz);
-    if (!iso) continue;
-    const [y, m] = iso.split("-").map(Number);
-    const monthKey = `${y}-${String(m).padStart(2, "0")}`;
-    const monthStart = `${monthKey}-01`;
-    const monthEnd = toIsoDate(new Date(Date.UTC(y, m, 0, 12)));
-    const label = formatMonthLabel(monthStart, tz);
-    const row = map.get(monthKey) ?? {
-      key: monthKey,
-      label,
-      count: 0,
-      from: monthStart,
-      to: monthEnd,
-    };
-    row.count += Number(entry.count || 0);
-    map.set(monthKey, row);
-  }
-  const points = Array.from(map.values()).sort((a, b) =>
-    a.key.localeCompare(b.key)
-  );
-  const total = points.reduce((sum, row) => sum + row.count, 0);
-  return { total, points, granularity };
-};
-
-const aggregateCanceledSeries = (
-  series:
-    | {
-        total: number;
-        byDay: Array<{
-          day: string;
-          rv1CanceledPostponed: number;
-          rv2CanceledPostponed: number;
-          total: number;
-        }>;
-      }
-    | null
-    | undefined,
-  granularity: SeriesGranularity,
-  tz: string
-): AggregatedCanceledSeries => {
-  const byDay = series?.byDay ?? [];
-  if (!byDay.length) {
-    return {
-      total: series?.total ?? 0,
-      points: [],
-      granularity,
-    };
-  }
-  const map = new Map<string, AggregatedCanceledPoint>();
-  const bucketFor = (iso: string) => {
-    if (granularity === "day") {
-      return {
-        key: iso,
-        label: formatShortDayLabel(iso, tz),
-        from: iso,
-        to: iso,
-      };
-    }
-    if (granularity === "week") {
-      const weekStart = startOfIsoWeek(iso);
-      const weekEnd = endOfIsoWeek(weekStart);
-      const key = toIsoDate(weekStart);
-      return {
-        key,
-        label: `S${String(getIsoWeekNumber(weekStart)).padStart(2, "0")}`,
-        from: key,
-        to: toIsoDate(weekEnd),
-      };
-    }
-    const [y, m] = iso.split("-").map(Number);
-    const monthKey = `${y}-${String(m).padStart(2, "0")}`;
-    const monthStart = `${monthKey}-01`;
-    return {
-      key: monthKey,
-      label: formatMonthLabel(monthStart, tz),
-      from: monthStart,
-      to: toIsoDate(new Date(Date.UTC(y, m, 0, 12))),
-    };
-  };
-  for (const entry of byDay) {
-    const iso = toTzIsoDate(entry.day, tz);
-    if (!iso) continue;
-    const bucket = bucketFor(iso);
-    const row = map.get(bucket.key) ?? {
-      key: bucket.key,
-      label: bucket.label,
-      rv1CanceledPostponed: 0,
-      rv2CanceledPostponed: 0,
-      total: 0,
-      from: bucket.from,
-      to: bucket.to,
-    };
-    row.rv1CanceledPostponed += Number(
-      entry.rv1CanceledPostponed || 0
-    );
-    row.rv2CanceledPostponed += Number(
-      entry.rv2CanceledPostponed || 0
-    );
-    row.total += Number(entry.total || 0);
-    map.set(bucket.key, row);
-  }
-  const points = Array.from(map.values()).sort((a, b) =>
-    a.key.localeCompare(b.key)
-  );
-  const total = points.reduce((sum, row) => sum + row.total, 0);
-  return { total, points, granularity };
-};
-
-const aggregateSalesWeekly = (
-  weeklySeries: SalesWeeklyItem[],
-  granularity: "week" | "month",
-  tz: string
-): AggregatedSalesSeries => {
-  if (!weeklySeries.length) {
-    return {
-      totalRevenue: 0,
-      totalCount: 0,
-      points: [],
-      granularity,
-    };
-  }
-  if (granularity === "week") {
-    const points = weeklySeries.map((w) => {
-      const weekStart = toTzIsoDate(w.weekStart, tz) || w.weekStart.slice(0, 10);
-      const weekEnd = toTzIsoDate(w.weekEnd, tz) || w.weekEnd.slice(0, 10);
-      return {
-        key: weekStart,
-        label: `${formatShortDayLabel(weekStart, tz)} → ${formatShortDayLabel(
-          weekEnd,
-          tz
-        )}`,
-        revenue: Math.round(w.revenue || 0),
-        count: Number(w.count || 0),
-        from: weekStart,
-        to: weekEnd,
-      };
-    });
-    const totalRevenue = points.reduce((sum, row) => sum + row.revenue, 0);
-    const totalCount = points.reduce((sum, row) => sum + row.count, 0);
-    return { totalRevenue, totalCount, points, granularity };
-  }
-  const map = new Map<string, AggregatedSalesPoint>();
-  for (const w of weeklySeries) {
-    const weekStart = toTzIsoDate(w.weekStart, tz) || w.weekStart.slice(0, 10);
-    const [y, m] = weekStart.split("-").map(Number);
-    const monthKey = `${y}-${String(m).padStart(2, "0")}`;
-    const monthStart = `${monthKey}-01`;
-    const monthEnd = toIsoDate(new Date(Date.UTC(y, m, 0, 12)));
-    const row = map.get(monthKey) ?? {
-      key: monthKey,
-      label: formatMonthLabel(monthStart, tz),
-      revenue: 0,
-      count: 0,
-      from: monthStart,
-      to: monthEnd,
-    };
-    row.revenue += Math.round(w.revenue || 0);
-    row.count += Number(w.count || 0);
-    map.set(monthKey, row);
-  }
-  const points = Array.from(map.values()).sort((a, b) =>
-    a.key.localeCompare(b.key)
-  );
-  const totalRevenue = points.reduce((sum, row) => sum + row.revenue, 0);
-  const totalCount = points.reduce((sum, row) => sum + row.count, 0);
-  return { totalRevenue, totalCount, points, granularity };
-};
 
 const EMPTY_METRIC_SERIES: MetricSeriesOut = {
   total: 0,
@@ -1603,32 +1253,6 @@ export default function DashboardPage() {
     () => asDate(range.to) ?? new Date(),
     [range.to]
   );
-  const rangeDays = useMemo(
-    () => getRangeDaysInclusive(fromISO, toISO),
-    [fromISO, toISO]
-  );
-  const isCompact = (rangeDays ?? 0) > 31;
-  const seriesGranularity = useMemo(
-    () => getSeriesGranularity(rangeDays),
-    [rangeDays]
-  );
-  const seriesGranularityLabel =
-    seriesGranularity === "day"
-      ? "jour"
-      : seriesGranularity === "week"
-        ? "semaine"
-        : "mois";
-  const chartHeightClass = isCompact ? "h-48" : "h-64";
-  const chartSpacingClass = isCompact ? "mt-1" : "mt-2";
-  const chartFooterSpacingClass = isCompact ? "mt-1" : "mt-2";
-  const chartMargin = isCompact
-    ? { top: 8, right: 12, left: 8, bottom: 8 }
-    : { left: 8, right: 8, top: 10, bottom: 0 };
-  const legendWrapperStyle = isCompact
-    ? { color: "#fff", opacity: 0.8, fontSize: 10 }
-    : { color: "#fff", opacity: 0.8 };
-  const salesGranularity =
-    seriesGranularity === "month" ? "month" : "week";
   const normalizedSetterIds = useMemo(
     () => normalizeFilterValues(setterIds),
     [setterIds]
@@ -1969,9 +1593,16 @@ const funnelData: FunnelProps["data"] = {
   const [rv1HonoredSeries, setRv1HonoredSeries] =
     useState<MetricSeriesOut | null>(null);
 
- // RV0 no-show (série brute)
-  const [rv0NoShowSeries, setRv0NoShowSeries] =
-    useState<MetricSeriesOut | null>(null);
+  // RV0 no-show par semaine
+  type Rv0NsWeek = {
+    weekStart: string;
+    weekEnd: string;
+    label: string;
+    count: number;
+  };
+const [rv0NsWeekly, setRv0NsWeekly] = useState<Rv0NsWeek[]>(
+    []
+  );
   const [filterOptions, setFilterOptions] =
     useState<FilterOptions | null>(null);
   const [tagsOptions, setTagsOptions] = useState<string[]>([]);
@@ -2618,17 +2249,75 @@ const neutralKpiCell =
           setMCallsAnswered(m3 || null);
         }
 
-        // 3) RV0 no-show (série brute, agrégation plus bas)
+        // 3) RV0 no-show par semaine, à partir de StageEvent(RV0_NO_SHOW) → /metrics/stage-series
         if (isPersonFiltered) {
           if (!cancelled) {
-            setRv0NoShowSeries(null);
+            setRv0NsWeekly([]);
           }
           return;
         }
 
-        const rv0SeriesRes = await fetchStageSeriesForKey("rv0NoShow");
+        const rv0SeriesRes =
+          await fetchStageSeriesForKey("rv0NoShow");
+        const series = rv0SeriesRes?.byDay || [];
+
+        // Helpers semaine (UTC, lundi → dimanche)
+        function mondayLocal(d: Date) {
+          const dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          const dow = (dd.getDay() + 6) % 7; // Lundi = 0
+          dd.setDate(dd.getDate() - dow);
+          return dd;
+        }
+        function sundayLocal(d: Date) {
+          const m = mondayLocal(d);
+          const s = new Date(m);
+          s.setDate(s.getDate() + 6);
+          s.setHours(23, 59, 59, 999);
+          return s;
+        }
+
+
+        // Regroupe par semaine (clé = lundi de la semaine)
+        const map = new Map<string, { start: Date; end: Date; count: number }>();
+
+        for (const entry of series) {
+          const when = new Date(entry.day);
+          if (isNaN(when.getTime())) continue;
+
+          const ws = mondayLocal(when);
+          const we = sundayLocal(when);
+          const key = ws.toISOString();
+
+          const row = map.get(key) ?? { start: ws, end: we, count: 0 };
+          row.count += entry.count;
+          map.set(key, row);
+        }
+        // Construit les semaines continues pour la période demandée
+        const weeks: Rv0NsWeek[] = [];
+        if (fromISO && toISO) {
+          const start = mondayLocal(new Date(fromISO));
+          const end = sundayLocal(new Date(toISO));
+          for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 7)) {
+            const ws = new Date(d);
+            const we = sundayLocal(ws);
+            const key = ws.toISOString();
+            const bucket = map.get(key);
+
+            weeks.push({
+              weekStart: ws.toISOString(),
+              weekEnd: we.toISOString(),
+              label:
+                ws.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) +
+                " → " +
+                we.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
+              count: bucket?.count ?? 0,
+            });
+          }
+        }
+
+
         if (!cancelled) {
-          setRv0NoShowSeries(rv0SeriesRes || null);
+          setRv0NsWeekly(weeks);
         }
       } catch (e: any) {
         if (cancelled) return;
@@ -3346,8 +3035,10 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
         const arr = src?.byDay ?? [];
         for (const it of arr) {
           if (!it?.day) continue;
-          const dayKey = toTzIsoDate(it.day, tz);
-          if (!dayKey) continue;
+          const dayKey =
+            it.day.length >= 10
+              ? it.day.slice(0, 10)
+              : new Date(it.day).toISOString().slice(0, 10);
           const row = map.get(dayKey) ?? { rv1: 0, rv2: 0 };
           row[key] += Number(it.count || 0);
           map.set(dayKey, row);
@@ -3398,57 +3089,8 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
   fetchStageSeriesForKey,
   fromISO,
   isPersonFiltered,
-  tz,
   toISO,
 ]);
-  const leadsSeries = useMemo(
-    () => aggregateCountSeries(leadsRcv, seriesGranularity, tz),
-    [leadsRcv, seriesGranularity, tz]
-  );
-  const callReqSeries = useMemo(
-    () => aggregateCountSeries(mCallReq, seriesGranularity, tz),
-    [mCallReq, seriesGranularity, tz]
-  );
-  const rv0HonoredSeries = useMemo(
-    () => aggregateCountSeries(rv0Daily, seriesGranularity, tz),
-    [rv0Daily, seriesGranularity, tz]
-  );
-  const rv0NoShowAggregated = useMemo(
-    () => aggregateCountSeries(rv0NoShowSeries, seriesGranularity, tz),
-    [rv0NoShowSeries, seriesGranularity, tz]
-  );
-  const canceledAggregated = useMemo(
-    () => aggregateCanceledSeries(canceledDaily, seriesGranularity, tz),
-    [canceledDaily, seriesGranularity, tz]
-  );
-  const salesAggregated = useMemo(
-    () => aggregateSalesWeekly(salesWeekly, salesGranularity, tz),
-    [salesWeekly, salesGranularity, tz]
-  );
-  const leadsTickInterval = useMemo(
-    () => getTickInterval(leadsSeries.points.length),
-    [leadsSeries.points.length]
-  );
-  const callReqTickInterval = useMemo(
-    () => getTickInterval(callReqSeries.points.length),
-    [callReqSeries.points.length]
-  );
-  const rv0TickInterval = useMemo(
-    () => getTickInterval(rv0HonoredSeries.points.length),
-    [rv0HonoredSeries.points.length]
-  );
-  const rv0NoShowTickInterval = useMemo(
-    () => getTickInterval(rv0NoShowAggregated.points.length),
-    [rv0NoShowAggregated.points.length]
-  );
-  const canceledTickInterval = useMemo(
-    () => getTickInterval(canceledAggregated.points.length),
-    [canceledAggregated.points.length]
-  );
-  const salesTickInterval = useMemo(
-    () => getTickInterval(salesAggregated.points.length),
-    [salesAggregated.points.length]
-  );
   // ======= DRILLS : helpers endpoints =======
 async function openAppointmentsDrill(params: {
     title: string;
@@ -4549,38 +4191,41 @@ function KpiBox({
 
           {/* ===== Charts Deck ===== */}
           
-          <div
-            className={`grid grid-cols-1 xl:grid-cols-2 ${isCompact ? "mt-3 gap-3" : "mt-4 gap-4"}`}
-          >
+          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
             {/* Leads reçus */}
             {!isPersonFiltered && (
-              <div
-                className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
-              >
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
                 <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
-                    Leads reçus par {seriesGranularityLabel}
-                    {focusScopeSuffix}
+                    Leads reçus par jour{focusScopeSuffix}
                   </div>
                   <div className="text-xs text-[--muted]">
-                    {(leadsSeries.total ?? 0).toLocaleString(
+                    {(leadsRcv?.total ?? 0).toLocaleString(
                       "fr-FR"
                     )}{" "}
                     au total
                   </div>
                 </div>
-                <div
-                  className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
-                >
-                  {leadsSeries.points.length ? (
+                <div className="h-64 mt-2">
+                  {leadsRcv?.byDay?.length ? (
                     <ResponsiveContainer
                       width="100%"
                       height="100%"
                     >
                       <BarChart
-                        data={leadsSeries.points}
-                        margin={chartMargin}
+                        data={leadsRcv.byDay.map((d) => ({
+                          day: new Date(
+                            d.day
+                          ).toLocaleDateString("fr-FR"),
+                          count: d.count,
+                        }))}
+                        margin={{
+                          left: 8,
+                          right: 8,
+                          top: 10,
+                          bottom: 0,
+                        }}
                       >
                         <defs>
                           <linearGradient
@@ -4607,8 +4252,7 @@ function KpiBox({
                           stroke={COLORS.grid}
                         />
                         <XAxis
-                          dataKey="label"
-                          interval={leadsTickInterval}
+                          dataKey="day"
                           tick={{
                             fill: COLORS.axis,
                             fontSize: 12,
@@ -4632,11 +4276,12 @@ function KpiBox({
                             />
                           }
                         />
-                        {!isCompact && (
-                          <Legend
-                            wrapperStyle={legendWrapperStyle}
-                          />
-                        )}
+                        <Legend
+                          wrapperStyle={{
+                            color: "#fff",
+                            opacity: 0.8,
+                          }}
+                        />
                         <Bar
                           name="Leads"
                           dataKey="count"
@@ -4652,9 +4297,7 @@ function KpiBox({
                     </div>
                   )}
                 </div>
-                <div
-                  className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
-                >
+                <div className="text-[11px] text-[--muted] mt-2">
                   Basé sur la <b>date de création</b> du contact
                   {focusScopeSuffix || ""}.
                 </div>
@@ -4662,36 +4305,55 @@ function KpiBox({
             )}
 
             {/* CA hebdo (WON) */}
-            <div
-              className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
-            >
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
               <div className="absolute -left-16 -top-10 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
               <div className="flex items-center justify-between">
                 <div className="font-medium">
-                  Production{" "}
-                  {salesAggregated.granularity === "month"
-                    ? "mensuelle"
-                    : "hebdomadaire"}{" "}
-                  (ventes gagnées)
+                  Production hebdomadaire (ventes gagnées)
                 </div>
                 <div className="text-xs text-[--muted]">
-                  {(salesAggregated.totalRevenue || 0).toLocaleString(
-                    "fr-FR"
-                  )}{" "}
+                  {(
+                    salesWeekly.reduce(
+                      (s, w) => s + (w.revenue || 0),
+                      0
+                    ) || 0
+                  ).toLocaleString("fr-FR")}{" "}
                   €
                 </div>
               </div>
-              <div
-                className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
-              >
-                {salesAggregated.points.length ? (
+              <div className="h-64 mt-2">
+                {salesWeekly.length ? (
                   <ResponsiveContainer
                     width="100%"
                     height="100%"
                   >
                     <BarChart
-                      data={salesAggregated.points}
-                      margin={chartMargin}
+                      data={salesWeekly.map((w) => ({
+                        label:
+                          new Date(
+                            w.weekStart
+                          ).toLocaleDateString("fr-FR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                          }) +
+                          " → " +
+                          new Date(
+                            w.weekEnd
+                          ).toLocaleDateString("fr-FR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                          }),
+                        revenue: Math.round(
+                          w.revenue
+                        ),
+                        count: w.count,
+                      }))}
+                      margin={{
+                        left: 8,
+                        right: 8,
+                        top: 10,
+                        bottom: 0,
+                      }}
                     >
                       <defs>
                         <linearGradient
@@ -4737,7 +4399,6 @@ function KpiBox({
                       />
                       <XAxis
                         dataKey="label"
-                        interval={salesTickInterval}
                         tick={{
                           fill: COLORS.axis,
                           fontSize: 12,
@@ -4772,7 +4433,10 @@ function KpiBox({
                         }
                       />
                       <Legend
-                        wrapperStyle={legendWrapperStyle}
+                        wrapperStyle={{
+                          color: "#fff",
+                          opacity: 0.8,
+                        }}
                       />
                       <Bar
                         yAxisId="left"
@@ -4798,39 +4462,43 @@ function KpiBox({
                   </div>
                 )}
               </div>
-              <div
-                className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
-              >
+              <div className="text-[11px] text-[--muted] mt-2">
                 Basé sur la{" "}
                 <b>date de passage en WON</b>.
               </div>
             </div>
 
             {/* Call requests */}
-            <div
-              className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
-            >
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
               <div className="flex items-center justify-between">
                 <div className="font-medium">
-                  Demandes d’appel par {seriesGranularityLabel}
+                  Demandes d’appel par jour
                 </div>
                 <div className="text-xs text-[--muted]">
-                  {(callReqSeries.total ?? 0).toLocaleString(
+                  {(mCallReq?.total ?? 0).toLocaleString(
                     "fr-FR"
                   )}
                 </div>
               </div>
-              <div
-                className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
-              >
-                {callReqSeries.points.length ? (
+              <div className="h-64 mt-2">
+                {mCallReq?.byDay?.length ? (
                   <ResponsiveContainer
                     width="100%"
                     height="100%"
                   >
                     <BarChart
-                      data={callReqSeries.points}
-                      margin={chartMargin}
+                      data={mCallReq.byDay.map((d) => ({
+                        day: new Date(
+                          d.day
+                        ).toLocaleDateString("fr-FR"),
+                        count: d.count,
+                      }))}
+                      margin={{
+                        left: 8,
+                        right: 8,
+                        top: 10,
+                        bottom: 0,
+                      }}
                     >
                       <defs>
                         <linearGradient
@@ -4857,8 +4525,7 @@ function KpiBox({
                         stroke={COLORS.grid}
                       />
                       <XAxis
-                        dataKey="label"
-                        interval={callReqTickInterval}
+                        dataKey="day"
                         tick={{
                           fill: COLORS.axis,
                           fontSize: 12,
@@ -4882,11 +4549,12 @@ function KpiBox({
                           />
                         }
                       />
-                      {!isCompact && (
-                        <Legend
-                          wrapperStyle={legendWrapperStyle}
-                        />
-                      )}
+                      <Legend
+                        wrapperStyle={{
+                          color: "#fff",
+                          opacity: 0.8,
+                        }}
+                      />
                       <Bar
                         name="Demandes"
                         dataKey="count"
@@ -4902,9 +4570,7 @@ function KpiBox({
                   </div>
                 )}
               </div>
-              <div
-                className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
-              >
+              <div className="text-[11px] text-[--muted] mt-2">
                 Basé sur{" "}
                 <b>CallRequest.requestedAt</b>.
               </div>
@@ -4912,29 +4578,23 @@ function KpiBox({
 
             {/* RV0 faits par jour */}
             {!isCloserFiltered && (
-              <div
-                className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl ${isCompact ? "p-3" : "p-4"}`}
-              >
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
                 <div className="flex items-center justify-between">
-                  <div className="font-medium">
-                    RV0 faits par {seriesGranularityLabel}
-                  </div>
+                  <div className="font-medium">RV0 faits par jour</div>
                   <div className="text-xs text-[--muted]">
-                    {(rv0HonoredSeries.total ?? 0).toLocaleString(
-                      "fr-FR"
-                    )}{" "}
-                    au total
+                    {(rv0Daily?.total ?? 0).toLocaleString("fr-FR")} au total
                   </div>
                 </div>
 
-                <div
-                  className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
-                >
-                  {rv0HonoredSeries.points.length ? (
+                <div className="h-64 mt-2">
+                  {rv0Daily?.byDay?.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={rv0HonoredSeries.points}
-                        margin={chartMargin}
+                        data={rv0Daily.byDay.map((d) => ({
+                          day: new Date(d.day).toLocaleDateString("fr-FR"),
+                          count: d.count,
+                        }))}
+                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
                       >
                         <defs>
                           <linearGradient id="gradRv0Done" x1="0" y1="0" x2="0" y2="1">
@@ -4945,8 +4605,7 @@ function KpiBox({
 
                         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
                         <XAxis
-                          dataKey="label"
-                          interval={rv0TickInterval}
+                          dataKey="day"
                           tick={{ fill: COLORS.axis, fontSize: 12 }}
                         />
                         <YAxis
@@ -4963,11 +4622,7 @@ function KpiBox({
                             />
                           }
                         />
-                        {!isCompact && (
-                          <Legend
-                            wrapperStyle={legendWrapperStyle}
-                          />
-                        )}
+                        <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
                         <Bar
                           name="RV0 faits"
                           dataKey="count"
@@ -4984,9 +4639,7 @@ function KpiBox({
                   )}
                 </div>
 
-                <div
-                  className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
-                >
+                <div className="text-[11px] text-[--muted] mt-2">
                   Basé sur les <b>StageEvents RV0_HONORED</b> (date de RDV).
                 </div>
               </div>
@@ -4995,28 +4648,34 @@ function KpiBox({
 
             {/* RV0 no-show weekly */}
             {!isPersonFiltered && (
-              <div
-                className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl xl:col-span-2 ${isCompact ? "p-3" : "p-4"}`}
-              >
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
-                    RV0 no-show par {seriesGranularityLabel}
+                    RV0 no-show par semaine
                   </div>
                   <div className="text-xs text-[--muted]">
-                    {(rv0NoShowAggregated.total || 0).toLocaleString("fr-FR")}
+                    {rv0NsWeekly
+                      .reduce(
+                        (s, x) => s + (x.count || 0),
+                        0
+                      )
+                      .toLocaleString("fr-FR")}
                   </div>
                 </div>
-                <div
-                  className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
-                >
-                  {rv0NoShowAggregated.points.length ? (
+                <div className="h-64 mt-2">
+                  {rv0NsWeekly.length ? (
                     <ResponsiveContainer
                       width="100%"
                       height="100%"
                     >
                       <BarChart
-                        data={rv0NoShowAggregated.points}
-                        margin={chartMargin}
+                        data={rv0NsWeekly}
+                        margin={{
+                          left: 8,
+                          right: 8,
+                          top: 10,
+                          bottom: 0,
+                        }}
                       >
                         <defs>
                           <linearGradient
@@ -5044,7 +4703,6 @@ function KpiBox({
                         />
                         <XAxis
                           dataKey="label"
-                          interval={rv0NoShowTickInterval}
                           tick={{
                             fill: COLORS.axis,
                             fontSize: 12,
@@ -5068,29 +4726,39 @@ function KpiBox({
                             />
                           }
                         />
-                        {!isCompact && (
-                          <Legend
-                            wrapperStyle={legendWrapperStyle}
-                          />
-                        )}
+                        <Legend
+                          wrapperStyle={{
+                            color: "#fff",
+                            opacity: 0.8,
+                          }}
+                        />
                         <Bar
                           name="RV0 no-show"
                           dataKey="count"
+                          fill="url(#gradRv0Ns)"
                           radius={[8, 8, 0, 0]}
                           maxBarSize={44}
                           onClick={(d: any) => {
-                            const payload =
-                              d?.payload ||
-                              d?.activePayload?.[0]?.payload;
+                            if (!d?.activeLabel) return;
                             const row =
-                              payload as AggregatedCountPoint | undefined;
+                              rv0NsWeekly.find(
+                                (x) =>
+                                  x.label ===
+                                  d.activeLabel
+                              );
                             if (!row) return;
                             openAppointmentsDrill({
-                              title: `RV0 no-show – ${row.label}`,
+                              title: `RV0 no-show – semaine ${row.label}`,
                               type: "RV0",
                               status: "NO_SHOW",
-                              from: row.from,
-                              to: row.to,
+                              from: row.weekStart.slice(
+                                0,
+                                10
+                              ),
+                              to: row.weekEnd.slice(
+                                0,
+                                10
+                              ),
                             });
                           }}
                         />
@@ -5102,41 +4770,26 @@ function KpiBox({
                     </div>
                   )}
                 </div>
-                <div
-                  className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
-                >
+                <div className="text-[11px] text-[--muted] mt-2">
                   Compté sur la{" "}
-                  <b>date/heure du RDV</b> : chaque barre ={" "}
-                  {seriesGranularity === "week"
-                    ? "lundi → dimanche"
-                    : seriesGranularityLabel}
-                  .
+                  <b>date/heure du RDV</b> : chaque barre = lundi → dimanche.
                 </div>
 
                 {/* Annulés / reportés par jour — RV1 & RV2 */}
-                <div
-                  className={`relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl xl:col-span-2 ${isCompact ? "p-3" : "p-4"}`}
-                >
+                <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
                   <div className="flex items-center justify-between">
-                    <div className="font-medium">
-                      Annulés / reportés par {seriesGranularityLabel} (RV1 & RV2)
-                    </div>
+                    <div className="font-medium">Annulés / reportés par jour (RV1 & RV2)</div>
                     <div className="text-xs text-[--muted]">
-                      {(canceledAggregated.total ?? 0).toLocaleString(
-                        "fr-FR"
-                      )}{" "}
-                      au total
-                     </div>
+                      {(canceledDaily?.total ?? 0).toLocaleString("fr-FR")} au total
+                    </div>
                   </div>
 
-                  <div
-                    className={`w-full min-w-0 overflow-hidden ${chartHeightClass} ${chartSpacingClass}`}
-                  >
-                    {canceledAggregated.points.length ? (
+                  <div className="h-64 mt-2">
+                    {canceledDaily?.byDay?.length ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          data={canceledAggregated.points}
-                          margin={chartMargin}
+                          data={canceledDaily.byDay}
+                          margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
                         >
                           <defs>
                             {/* RV1 : annulé + reporté */}
@@ -5154,10 +4807,13 @@ function KpiBox({
                           <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
 
                           <XAxis
-                            dataKey="label"
+                            dataKey="day"
                             type="category"
-                            interval={canceledTickInterval}
                             tick={{ fill: COLORS.axis, fontSize: 12 }}
+                            tickFormatter={(d: string) => {
+                              const [y, m, dd] = d.split("-");
+                              return `${dd}/${m}/${y}`;
+                            }}
                           />
 
                           <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
@@ -5174,9 +4830,7 @@ function KpiBox({
                               />
                             }
                           />
-                          <Legend
-                            wrapperStyle={legendWrapperStyle}
-                          />
+                          <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
 
                           {/* Deux barres côte à côte (pas de stackId) */}
                           <Bar
@@ -5202,16 +4856,8 @@ function KpiBox({
                     )}
                   </div>
 
-                  <div
-                    className={`text-[11px] text-[--muted] ${chartFooterSpacingClass}`}
-                  >
-                    Agrégation{" "}
-                    {seriesGranularity === "day"
-                      ? "quotidienne"
-                      : seriesGranularity === "week"
-                        ? "hebdomadaire"
-                        : "mensuelle"}{" "}
-                    dans le fuseau <b>{tz}</b> · chaque barre combine
+                  <div className="text-[11px] text-[--muted] mt-2">
+                    Agrégation quotidienne dans le fuseau <b>{tz}</b> · chaque barre combine
                     <b> annulés + reportés</b> pour RV1 et RV2.
                   </div>
                 </div>
@@ -6467,4 +6113,3 @@ function KpiBox({
   );
   
 }
-
