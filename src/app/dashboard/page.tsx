@@ -5,7 +5,7 @@ import type { AxiosRequestConfig } from "axios";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
-import { currentMonthRange } from "@/lib/date";
+import { currentMonthRange, toISODateInTz } from "@/lib/date";
 import Sidebar from "@/components/Sidebar";
 import DateRangePicker, { type Range } from "@/components/DateRangePicker";
 
@@ -309,9 +309,6 @@ function toISODate(d: Date | string) {
   const day = String(dd.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-function toISODateUTC(d: Date) {
-  return toISOFromParts(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
-}
 function deriveLeadCreatedMode(
   from?: string,
   to?: string
@@ -325,292 +322,360 @@ const fmtEUR = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
 const fmtPct = (num?: number | null, den?: number | null) =>
   den && den > 0 ? `${Math.round(((num || 0) / den) * 100)}%` : "—";
 
-type Granularity = "day" | "week" | "month" | "year";
-type Bucket = {
+type SeriesGranularity = "day" | "week" | "month";
+type AggregatedCountPoint = {
   key: string;
   label: string;
-  value: number;
-  startISO: string;
-  endISO: string;
-  values?: Record<string, number>;
-  meta?: { week?: number; year?: number; month?: number };
+  count: number;
+  from: string;
+  to: string;
+};
+type AggregatedCountSeries = {
+  total: number;
+  points: AggregatedCountPoint[];
+  granularity: SeriesGranularity;
+};
+type AggregatedCanceledPoint = {
+  key: string;
+  label: string;
+  rv1CanceledPostponed: number;
+  rv2CanceledPostponed: number;
+  total: number;
+  from: string;
+  to: string;
+};
+type AggregatedCanceledSeries = {
+  total: number;
+  points: AggregatedCanceledPoint[];
+  granularity: SeriesGranularity;
+};
+type AggregatedSalesPoint = {
+  key: string;
+  label: string;
+  revenue: number;
+  count: number;
+  from: string;
+  to: string;
+};
+type AggregatedSalesSeries = {
+  totalRevenue: number;
+  totalCount: number;
+  points: AggregatedSalesPoint[];
+  granularity: "week" | "month";
 };
 
-const MAX_POINTS_BY_GRANULARITY: Record<Granularity, number> = {
-  day: 31,
-  week: 16,
-  month: 12,
-  year: 10,
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const parseIsoDateUtc = (iso: string) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12));
 };
 
-const MS_PER_DAY = 86_400_000;
+const toIsoDate = (date: Date) => date.toISOString().slice(0, 10);
 
-function parseISODateParts(iso: string) {
-  const [y, m, d] = iso.split("-").map((v) => Number(v));
-  if (!y || !m || !d) return null;
-  return { year: y, month: m, day: d };
-}
+const toTzIsoDate = (value: string, tz: string) => {
+  if (!value) return "";
+  const iso = toISODateInTz(value, tz);
+  if (iso) return iso;
+  if (value.length >= 10) return value.slice(0, 10);
+  const fallback = new Date(value);
+  if (Number.isNaN(fallback.getTime())) return "";
+  return toISODateInTz(fallback, tz);
+};
 
-function toISOFromParts(year: number, month: number, day: number) {
-  const m = String(month).padStart(2, "0");
-  const d = String(day).padStart(2, "0");
-  return `${year}-${m}-${d}`;
-}
+const formatShortDayLabel = (iso: string, tz: string) =>
+  new Intl.DateTimeFormat("fr-FR", {
+    timeZone: tz,
+    day: "2-digit",
+    month: "2-digit",
+  }).format(parseIsoDateUtc(iso));
 
-function dateFromPartsUTC(parts: { year: number; month: number; day: number }) {
-  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
-}
+const formatMonthLabel = (iso: string, tz: string) =>
+  new Intl.DateTimeFormat("fr-FR", {
+    timeZone: tz,
+    month: "short",
+    year: "numeric",
+  }).format(parseIsoDateUtc(iso));
 
-function addDaysUTC(date: Date, days: number) {
-  return new Date(date.getTime() + days * MS_PER_DAY);
-}
+const startOfIsoWeek = (iso: string) => {
+  const date = parseIsoDateUtc(iso);
+  const day = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - day);
+  return date;
+};
 
-function calculateRangeDays(fromISO?: string, toISO?: string) {
-  if (!fromISO || !toISO) return 0;
-  const fromParts = parseISODateParts(fromISO);
-  const toParts = parseISODateParts(toISO);
-  if (!fromParts || !toParts) return 0;
-  const fromDate = dateFromPartsUTC(fromParts);
-  const toDate = dateFromPartsUTC(toParts);
-  const diffDays = Math.floor((toDate.getTime() - fromDate.getTime()) / MS_PER_DAY);
-  return diffDays + 1;
-}
+const endOfIsoWeek = (start: Date) => {
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  return end;
+};
 
-function resolveGranularity(rangeDays: number): Granularity {
+const getIsoWeekNumber = (date: Date) => {
+  const temp = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  );
+  const dayNum = temp.getUTCDay() || 7;
+  temp.setUTCDate(temp.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(temp.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(
+    ((temp.getTime() - yearStart.getTime()) / DAY_MS + 1) / 7
+  );
+  return weekNo;
+};
+
+const getRangeDaysInclusive = (fromISO?: string, toISO?: string) => {
+  if (!fromISO || !toISO) return null;
+  const start = parseIsoDateUtc(fromISO);
+  const end = parseIsoDateUtc(toISO);
+  const diff = Math.round((end.getTime() - start.getTime()) / DAY_MS);
+  return diff + 1;
+};
+
+const getSeriesGranularity = (
+  rangeDays: number | null
+): SeriesGranularity => {
+  if (!rangeDays) return "day";
   if (rangeDays <= 31) return "day";
   if (rangeDays <= 120) return "week";
-  if (rangeDays <= 900) return "month";
-  return "year";
-}
-
-function formatDayLabel(iso: string, withYear: boolean) {
-  const parts = parseISODateParts(iso);
-  if (!parts) return iso;
-  const day = String(parts.day).padStart(2, "0");
-  const month = String(parts.month).padStart(2, "0");
-  if (!withYear) return `${day}/${month}`;
-  return `${day}/${month}/${parts.year}`;
-}
-
-function formatMonthLabel(year: number, month: number, tz?: string) {
-  const date = new Date(Date.UTC(year, month - 1, 15, 12));
-  const label = date.toLocaleDateString("fr-FR", {
-    month: "short",
-    timeZone: tz ?? "Europe/Paris",
-  });
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${year}`;
-}
-
-function getISOWeekInfo(date: Date) {
-  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const dayNr = (target.getUTCDay() + 6) % 7;
-  target.setUTCDate(target.getUTCDate() - dayNr + 3);
-  const weekYear = target.getUTCFullYear();
-  const firstThursday = new Date(Date.UTC(weekYear, 0, 4));
-  const firstDayNr = (firstThursday.getUTCDay() + 6) % 7;
-  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNr + 3);
-  const weekNumber =
-    1 + Math.round((target.getTime() - firstThursday.getTime()) / (7 * MS_PER_DAY));
-  const weekStart = addDaysUTC(target, -3);
-  const weekEnd = addDaysUTC(weekStart, 6);
-  return { weekNumber, weekYear, weekStart, weekEnd };
-}
-
-function buildBucketLabel(
-  bucket: Bucket,
-  granularity: Granularity,
-  includeWeekYear: boolean,
-  tz?: string
-) {
-  if (granularity === "day") {
-    return formatDayLabel(bucket.startISO, false);
-  }
-  if (granularity === "week") {
-    const week = String(bucket.meta?.week ?? 0).padStart(2, "0");
-    return includeWeekYear ? `S${week} ${bucket.meta?.year ?? ""}` : `S${week}`;
-  }
-  if (granularity === "month") {
-    const year = bucket.meta?.year ?? Number(bucket.startISO.slice(0, 4));
-    const month = bucket.meta?.month ?? Number(bucket.startISO.slice(5, 7));
-    return formatMonthLabel(year, month, tz);
-  }
-  return String(bucket.meta?.year ?? bucket.startISO.slice(0, 4));
-}
-
-function formatBucketNote(bucket: Bucket, granularity: Granularity, tz?: string) {
-  if (granularity === "day") {
-    return formatDayLabel(bucket.startISO, true);
-  }
-  if (granularity === "week") {
-    const week = String(bucket.meta?.week ?? 0).padStart(2, "0");
-    return `S${week} ${bucket.meta?.year ?? ""}`;
-  }
-  if (granularity === "month") {
-    const year = bucket.meta?.year ?? Number(bucket.startISO.slice(0, 4));
-    const month = bucket.meta?.month ?? Number(bucket.startISO.slice(5, 7));
-    return formatMonthLabel(year, month, tz);
-  }
-  return String(bucket.meta?.year ?? bucket.startISO.slice(0, 4));
-}
-
-type BarChartPreset = {
-  barCategoryGap: number | string;
-  barGap: number;
-  barSize: number;
-  maxBarSize: number;
-  xAxisPadding: { left: number; right: number };
+  return "month";
 };
 
-function getBarChartPreset(
-  granularity: Granularity,
-  pointsCount: number
-): BarChartPreset {
-   if (granularity !== "day") {
+const getTickInterval = (count: number) => {
+  if (count > 40) return Math.ceil(count / 12);
+  if (count > 20) return 1;
+  return 0;
+};
+
+const aggregateCountSeries = (
+  series: MetricSeriesOut | null | undefined,
+  granularity: SeriesGranularity,
+  tz: string
+): AggregatedCountSeries => {
+  const byDay = series?.byDay ?? [];
+  if (!byDay.length) {
     return {
-      barCategoryGap: 0,
-      barGap: 0,
-      barSize: 6,
-      maxBarSize: 10,
-      xAxisPadding: { left: 0, right: 0 },
+      total: series?.total ?? 0,
+      points: [],
+      granularity,
     };
   }
+  if (granularity === "day") {
+    const points = byDay
+      .map((entry) => {
+        const iso = toTzIsoDate(entry.day, tz);
+        if (!iso) return null;
+        return {
+          key: iso,
+          label: formatShortDayLabel(iso, tz),
+          count: Number(entry.count || 0),
+          from: iso,
+          to: iso,
+        };
+      })
+      .filter(Boolean) as AggregatedCountPoint[];
+    points.sort((a, b) => a.key.localeCompare(b.key));
+    const total = points.reduce((sum, row) => sum + row.count, 0);
+    return { total, points, granularity };
+  }
+  if (granularity === "week") {
+    const map = new Map<string, AggregatedCountPoint>();
+    for (const entry of byDay) {
+      const iso = toTzIsoDate(entry.day, tz);
+      if (!iso) continue;
+      const weekStart = startOfIsoWeek(iso);
+      const weekEnd = endOfIsoWeek(weekStart);
+      const key = toIsoDate(weekStart);
+      const label = `S${String(getIsoWeekNumber(weekStart)).padStart(2, "0")}`;
+      const row = map.get(key) ?? {
+        key,
+        label,
+        count: 0,
+        from: key,
+        to: toIsoDate(weekEnd),
+      };
+      row.count += Number(entry.count || 0);
+      map.set(key, row);
+    }
+    const points = Array.from(map.values()).sort((a, b) =>
+      a.key.localeCompare(b.key)
+    );
+    const total = points.reduce((sum, row) => sum + row.count, 0);
+    return { total, points, granularity };
+  }
+  const map = new Map<string, AggregatedCountPoint>();
+  for (const entry of byDay) {
+    const iso = toTzIsoDate(entry.day, tz);
+    if (!iso) continue;
+    const [y, m] = iso.split("-").map(Number);
+    const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+    const monthStart = `${monthKey}-01`;
+    const monthEnd = toIsoDate(new Date(Date.UTC(y, m, 0, 12)));
+    const label = formatMonthLabel(monthStart, tz);
+    const row = map.get(monthKey) ?? {
+      key: monthKey,
+      label,
+      count: 0,
+      from: monthStart,
+      to: monthEnd,
+    };
+    row.count += Number(entry.count || 0);
+    map.set(monthKey, row);
+  }
+  const points = Array.from(map.values()).sort((a, b) =>
+    a.key.localeCompare(b.key)
+  );
+  const total = points.reduce((sum, row) => sum + row.count, 0);
+  return { total, points, granularity };
+};
 
-  const isDense = pointsCount > 45;
-  const isModerate = pointsCount > 31;
-  const barSize = isDense ? 6 : isModerate ? 8 : 10;
-
-  return {
-    barCategoryGap: "20%",
-    barGap: 2,
-    barSize,
-    maxBarSize: isDense ? 16 : 28,
-    xAxisPadding: { left: 8, right: 8 },
-  };
-}
-
-function getNumericValue(value: unknown) {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function bucketSeries<T extends { day?: string | null }>(
-  points: T[] | null | undefined,
-  granularity: Granularity,
-  tz: string | undefined,
-  options: { valueKeys: string[] }
-): Bucket[] {
-  const rows = points ?? [];
-  const map = new Map<string, Bucket>();
-  for (const row of rows) {
-    const rawDay = row?.day;
-    if (!rawDay || typeof rawDay !== "string") continue;
-    const dayISO = rawDay.length >= 10 ? rawDay.slice(0, 10) : rawDay;
-    const parts = parseISODateParts(dayISO);
-    if (!parts) continue;
-    const dateUTC = dateFromPartsUTC(parts);
-
-    let key = dayISO;
-    let startISO = dayISO;
-    let endISO = dayISO;
-    let meta: Bucket["meta"] = {};
-
+const aggregateCanceledSeries = (
+  series:
+    | {
+        total: number;
+        byDay: Array<{
+          day: string;
+          rv1CanceledPostponed: number;
+          rv2CanceledPostponed: number;
+          total: number;
+        }>;
+      }
+    | null
+    | undefined,
+  granularity: SeriesGranularity,
+  tz: string
+): AggregatedCanceledSeries => {
+  const byDay = series?.byDay ?? [];
+  if (!byDay.length) {
+    return {
+      total: series?.total ?? 0,
+      points: [],
+      granularity,
+    };
+  }
+  const map = new Map<string, AggregatedCanceledPoint>();
+  const bucketFor = (iso: string) => {
+    if (granularity === "day") {
+      return {
+        key: iso,
+        label: formatShortDayLabel(iso, tz),
+        from: iso,
+        to: iso,
+      };
+    }
     if (granularity === "week") {
-      const { weekNumber, weekYear, weekStart, weekEnd } = getISOWeekInfo(dateUTC);
-      key = `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
-      startISO = toISODateUTC(weekStart);
-      endISO = toISODateUTC(weekEnd);
-      meta = { week: weekNumber, year: weekYear };
-    } else if (granularity === "month") {
-      key = `${parts.year}-${String(parts.month).padStart(2, "0")}`;
-      startISO = toISOFromParts(parts.year, parts.month, 1);
-      const endDate = new Date(Date.UTC(parts.year, parts.month, 0));
-      endISO = toISODateUTC(endDate);
-      meta = { month: parts.month, year: parts.year };
-    } else if (granularity === "year") {
-      key = `${parts.year}`;
-      startISO = toISOFromParts(parts.year, 1, 1);
-      endISO = toISOFromParts(parts.year, 12, 31);
-      meta = { year: parts.year };
+      const weekStart = startOfIsoWeek(iso);
+      const weekEnd = endOfIsoWeek(weekStart);
+      const key = toIsoDate(weekStart);
+      return {
+        key,
+        label: `S${String(getIsoWeekNumber(weekStart)).padStart(2, "0")}`,
+        from: key,
+        to: toIsoDate(weekEnd),
+      };
     }
-
-    const bucket = map.get(key);
-    const nextValues: Record<string, number> = bucket?.values
-      ? { ...bucket.values }
-      : {};
-    for (const valueKey of options.valueKeys) {
-      const rawValue = (row as Record<string, unknown>)[valueKey];
-      nextValues[valueKey] = (nextValues[valueKey] ?? 0) + getNumericValue(rawValue);
-    }
-    const nextValue = Object.values(nextValues).reduce((sum, val) => sum + val, 0);
-    map.set(key, {
-      key,
-      label: "",
-      value: nextValue,
-      startISO,
-      endISO,
-      values: nextValues,
-      meta,
-    });
-  }
-
-  const buckets = [...map.values()].sort((a, b) => a.startISO.localeCompare(b.startISO));
-  const includeWeekYear =
-    granularity === "week" &&
-    new Set(buckets.map((bucket) => bucket.meta?.year)).size > 1;
-  return buckets.map((bucket) => ({
-    ...bucket,
-    label: buildBucketLabel(bucket, granularity, includeWeekYear, tz),
-  }));
-}
-
-function trimEmptyStart(buckets: Bucket[]) {
-  let trimmedCount = 0;
-  let firstNonEmpty: Bucket | undefined;
-  for (const bucket of buckets) {
-    if (bucket.value !== 0) {
-      firstNonEmpty = bucket;
-      break;
-    }
-    trimmedCount += 1;
-  }
-  if (!trimmedCount) {
-    return { buckets, trimmedCount: 0, firstNonEmpty: buckets[0] };
-  }
-  return {
-    buckets: buckets.slice(trimmedCount),
-    trimmedCount,
-    firstNonEmpty,
+    const [y, m] = iso.split("-").map(Number);
+    const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+    const monthStart = `${monthKey}-01`;
+    return {
+      key: monthKey,
+      label: formatMonthLabel(monthStart, tz),
+      from: monthStart,
+      to: toIsoDate(new Date(Date.UTC(y, m, 0, 12))),
+    };
   };
-}
-
-function capPoints(buckets: Bucket[], maxPoints: number) {
-  if (buckets.length <= maxPoints || maxPoints <= 0) return buckets;
-  if (maxPoints === 1) return [buckets[0]];
-  if (maxPoints === 2) return [buckets[0], buckets[buckets.length - 1]];
-
-  const result: Bucket[] = [buckets[0]];
-  const innerCount = maxPoints - 2;
-  const step = Math.ceil((buckets.length - 2) / innerCount);
-  for (let i = 1; i < buckets.length - 1; i += step) {
-    result.push(buckets[i]);
+  for (const entry of byDay) {
+    const iso = toTzIsoDate(entry.day, tz);
+    if (!iso) continue;
+    const bucket = bucketFor(iso);
+    const row = map.get(bucket.key) ?? {
+      key: bucket.key,
+      label: bucket.label,
+      rv1CanceledPostponed: 0,
+      rv2CanceledPostponed: 0,
+      total: 0,
+      from: bucket.from,
+      to: bucket.to,
+    };
+    row.rv1CanceledPostponed += Number(
+      entry.rv1CanceledPostponed || 0
+    );
+    row.rv2CanceledPostponed += Number(
+      entry.rv2CanceledPostponed || 0
+    );
+    row.total += Number(entry.total || 0);
+    map.set(bucket.key, row);
   }
-  result.push(buckets[buckets.length - 1]);
-  return result;
-}
+  const points = Array.from(map.values()).sort((a, b) =>
+    a.key.localeCompare(b.key)
+  );
+  const total = points.reduce((sum, row) => sum + row.total, 0);
+  return { total, points, granularity };
+};
 
-function getDayInterval(length: number) {
-  if (length <= 7) return 0;
-  if (length <= 14) return 1;
-  if (length <= 21) return 2;
-  if (length <= 28) return 3;
-  return 4;
-}
+const aggregateSalesWeekly = (
+  weeklySeries: SalesWeeklyItem[],
+  granularity: "week" | "month",
+  tz: string
+): AggregatedSalesSeries => {
+  if (!weeklySeries.length) {
+    return {
+      totalRevenue: 0,
+      totalCount: 0,
+      points: [],
+      granularity,
+    };
+  }
+  if (granularity === "week") {
+    const points = weeklySeries.map((w) => {
+      const weekStart = toTzIsoDate(w.weekStart, tz) || w.weekStart.slice(0, 10);
+      const weekEnd = toTzIsoDate(w.weekEnd, tz) || w.weekEnd.slice(0, 10);
+      return {
+        key: weekStart,
+        label: `${formatShortDayLabel(weekStart, tz)} → ${formatShortDayLabel(
+          weekEnd,
+          tz
+        )}`,
+        revenue: Math.round(w.revenue || 0),
+        count: Number(w.count || 0),
+        from: weekStart,
+        to: weekEnd,
+      };
+    });
+    const totalRevenue = points.reduce((sum, row) => sum + row.revenue, 0);
+    const totalCount = points.reduce((sum, row) => sum + row.count, 0);
+    return { totalRevenue, totalCount, points, granularity };
+  }
+  const map = new Map<string, AggregatedSalesPoint>();
+  for (const w of weeklySeries) {
+    const weekStart = toTzIsoDate(w.weekStart, tz) || w.weekStart.slice(0, 10);
+    const [y, m] = weekStart.split("-").map(Number);
+    const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+    const monthStart = `${monthKey}-01`;
+    const monthEnd = toIsoDate(new Date(Date.UTC(y, m, 0, 12)));
+    const row = map.get(monthKey) ?? {
+      key: monthKey,
+      label: formatMonthLabel(monthStart, tz),
+      revenue: 0,
+      count: 0,
+      from: monthStart,
+      to: monthEnd,
+    };
+    row.revenue += Math.round(w.revenue || 0);
+    row.count += Number(w.count || 0);
+    map.set(monthKey, row);
+  }
+  const points = Array.from(map.values()).sort((a, b) =>
+    a.key.localeCompare(b.key)
+  );
+  const totalRevenue = points.reduce((sum, row) => sum + row.revenue, 0);
+  const totalCount = points.reduce((sum, row) => sum + row.count, 0);
+  return { totalRevenue, totalCount, points, granularity };
+};
 
 const EMPTY_METRIC_SERIES: MetricSeriesOut = {
   total: 0,
   byDay: [],
 };
-
 
 const mergeMetricSeries = (seriesList: MetricSeriesOut[]) => {
   const map = new Map<string, number>();
@@ -1539,13 +1604,21 @@ export default function DashboardPage() {
     [range.to]
   );
   const rangeDays = useMemo(
-    () => calculateRangeDays(fromISO, toISO),
+    () => getRangeDaysInclusive(fromISO, toISO),
     [fromISO, toISO]
   );
-  const granularity = useMemo(
-    () => resolveGranularity(rangeDays),
+  const seriesGranularity = useMemo(
+    () => getSeriesGranularity(rangeDays),
     [rangeDays]
   );
+  const seriesGranularityLabel =
+    seriesGranularity === "day"
+      ? "jour"
+      : seriesGranularity === "week"
+        ? "semaine"
+        : "mois";
+  const salesGranularity =
+    seriesGranularity === "month" ? "month" : "week";
   const normalizedSetterIds = useMemo(
     () => normalizeFilterValues(setterIds),
     [setterIds]
@@ -1886,16 +1959,9 @@ const funnelData: FunnelProps["data"] = {
   const [rv1HonoredSeries, setRv1HonoredSeries] =
     useState<MetricSeriesOut | null>(null);
 
-  // RV0 no-show par semaine
-  type Rv0NsWeek = {
-    weekStart: string;
-    weekEnd: string;
-    label: string;
-    count: number;
-  };
-const [rv0NsWeekly, setRv0NsWeekly] = useState<Rv0NsWeek[]>(
-    []
-  );
+ // RV0 no-show (série brute)
+  const [rv0NoShowSeries, setRv0NoShowSeries] =
+    useState<MetricSeriesOut | null>(null);
   const [filterOptions, setFilterOptions] =
     useState<FilterOptions | null>(null);
   const [tagsOptions, setTagsOptions] = useState<string[]>([]);
@@ -2542,75 +2608,17 @@ const neutralKpiCell =
           setMCallsAnswered(m3 || null);
         }
 
-        // 3) RV0 no-show par semaine, à partir de StageEvent(RV0_NO_SHOW) → /metrics/stage-series
+        // 3) RV0 no-show (série brute, agrégation plus bas)
         if (isPersonFiltered) {
           if (!cancelled) {
-            setRv0NsWeekly([]);
+            setRv0NoShowSeries(null);
           }
           return;
         }
 
-        const rv0SeriesRes =
-          await fetchStageSeriesForKey("rv0NoShow");
-        const series = rv0SeriesRes?.byDay || [];
-
-        // Helpers semaine (UTC, lundi → dimanche)
-        function mondayLocal(d: Date) {
-          const dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-          const dow = (dd.getDay() + 6) % 7; // Lundi = 0
-          dd.setDate(dd.getDate() - dow);
-          return dd;
-        }
-        function sundayLocal(d: Date) {
-          const m = mondayLocal(d);
-          const s = new Date(m);
-          s.setDate(s.getDate() + 6);
-          s.setHours(23, 59, 59, 999);
-          return s;
-        }
-
-
-        // Regroupe par semaine (clé = lundi de la semaine)
-        const map = new Map<string, { start: Date; end: Date; count: number }>();
-
-        for (const entry of series) {
-          const when = new Date(entry.day);
-          if (isNaN(when.getTime())) continue;
-
-          const ws = mondayLocal(when);
-          const we = sundayLocal(when);
-          const key = ws.toISOString();
-
-          const row = map.get(key) ?? { start: ws, end: we, count: 0 };
-          row.count += entry.count;
-          map.set(key, row);
-        }
-        // Construit les semaines continues pour la période demandée
-        const weeks: Rv0NsWeek[] = [];
-        if (fromISO && toISO) {
-          const start = mondayLocal(new Date(fromISO));
-          const end = sundayLocal(new Date(toISO));
-          for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 7)) {
-            const ws = new Date(d);
-            const we = sundayLocal(ws);
-            const key = ws.toISOString();
-            const bucket = map.get(key);
-
-            weeks.push({
-              weekStart: ws.toISOString(),
-              weekEnd: we.toISOString(),
-              label:
-                ws.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) +
-                " → " +
-                we.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
-              count: bucket?.count ?? 0,
-            });
-          }
-        }
-
-
+        const rv0SeriesRes = await fetchStageSeriesForKey("rv0NoShow");
         if (!cancelled) {
-          setRv0NsWeekly(weeks);
+          setRv0NoShowSeries(rv0SeriesRes || null);
         }
       } catch (e: any) {
         if (cancelled) return;
@@ -3328,10 +3336,8 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
         const arr = src?.byDay ?? [];
         for (const it of arr) {
           if (!it?.day) continue;
-          const dayKey =
-            it.day.length >= 10
-              ? it.day.slice(0, 10)
-              : new Date(it.day).toISOString().slice(0, 10);
+          const dayKey = toTzIsoDate(it.day, tz);
+          if (!dayKey) continue;
           const row = map.get(dayKey) ?? { rv1: 0, rv2: 0 };
           row[key] += Number(it.count || 0);
           map.set(dayKey, row);
@@ -3382,8 +3388,57 @@ const kpiSalesPrev = summaryPrev?.totals?.salesCount ?? 0;
   fetchStageSeriesForKey,
   fromISO,
   isPersonFiltered,
+  tz,
   toISO,
 ]);
+  const leadsSeries = useMemo(
+    () => aggregateCountSeries(leadsRcv, seriesGranularity, tz),
+    [leadsRcv, seriesGranularity, tz]
+  );
+  const callReqSeries = useMemo(
+    () => aggregateCountSeries(mCallReq, seriesGranularity, tz),
+    [mCallReq, seriesGranularity, tz]
+  );
+  const rv0HonoredSeries = useMemo(
+    () => aggregateCountSeries(rv0Daily, seriesGranularity, tz),
+    [rv0Daily, seriesGranularity, tz]
+  );
+  const rv0NoShowAggregated = useMemo(
+    () => aggregateCountSeries(rv0NoShowSeries, seriesGranularity, tz),
+    [rv0NoShowSeries, seriesGranularity, tz]
+  );
+  const canceledAggregated = useMemo(
+    () => aggregateCanceledSeries(canceledDaily, seriesGranularity, tz),
+    [canceledDaily, seriesGranularity, tz]
+  );
+  const salesAggregated = useMemo(
+    () => aggregateSalesWeekly(salesWeekly, salesGranularity, tz),
+    [salesWeekly, salesGranularity, tz]
+  );
+  const leadsTickInterval = useMemo(
+    () => getTickInterval(leadsSeries.points.length),
+    [leadsSeries.points.length]
+  );
+  const callReqTickInterval = useMemo(
+    () => getTickInterval(callReqSeries.points.length),
+    [callReqSeries.points.length]
+  );
+  const rv0TickInterval = useMemo(
+    () => getTickInterval(rv0HonoredSeries.points.length),
+    [rv0HonoredSeries.points.length]
+  );
+  const rv0NoShowTickInterval = useMemo(
+    () => getTickInterval(rv0NoShowAggregated.points.length),
+    [rv0NoShowAggregated.points.length]
+  );
+  const canceledTickInterval = useMemo(
+    () => getTickInterval(canceledAggregated.points.length),
+    [canceledAggregated.points.length]
+  );
+  const salesTickInterval = useMemo(
+    () => getTickInterval(salesAggregated.points.length),
+    [salesAggregated.points.length]
+  );
   // ======= DRILLS : helpers endpoints =======
 async function openAppointmentsDrill(params: {
     title: string;
@@ -3664,113 +3719,6 @@ function KpiBox({
   }
 };
 
-  const leadsSeries = useMemo(() => {
-    const buckets = bucketSeries(leadsRcv?.byDay, granularity, tz, {
-      valueKeys: ["count"],
-    });
-    const trimmed = trimEmptyStart(buckets);
-    const capped = capPoints(
-      trimmed.buckets,
-      MAX_POINTS_BY_GRANULARITY[granularity]
-    );
-    return {
-      data: capped.map((bucket) => ({
-        label: bucket.label,
-        count: bucket.values?.count ?? bucket.value,
-      })),
-      trimmedFrom: trimmed.firstNonEmpty,
-      trimmedCount: trimmed.trimmedCount,
-    };
-  }, [leadsRcv, granularity, tz]);
-
-  const callReqSeries = useMemo(() => {
-    const buckets = bucketSeries(mCallReq?.byDay, granularity, tz, {
-      valueKeys: ["count"],
-    });
-    const trimmed = trimEmptyStart(buckets);
-    const capped = capPoints(
-      trimmed.buckets,
-      MAX_POINTS_BY_GRANULARITY[granularity]
-    );
-    return {
-      data: capped.map((bucket) => ({
-        label: bucket.label,
-        count: bucket.values?.count ?? bucket.value,
-      })),
-      trimmedFrom: trimmed.firstNonEmpty,
-      trimmedCount: trimmed.trimmedCount,
-    };
-  }, [mCallReq, granularity, tz]);
-
-  const rv0Series = useMemo(() => {
-    const buckets = bucketSeries(rv0Daily?.byDay, granularity, tz, {
-      valueKeys: ["count"],
-    });
-    const trimmed = trimEmptyStart(buckets);
-    const capped = capPoints(
-      trimmed.buckets,
-      MAX_POINTS_BY_GRANULARITY[granularity]
-    );
-    return {
-      data: capped.map((bucket) => ({
-        label: bucket.label,
-        count: bucket.values?.count ?? bucket.value,
-      })),
-      trimmedFrom: trimmed.firstNonEmpty,
-      trimmedCount: trimmed.trimmedCount,
-    };
-  }, [rv0Daily, granularity, tz]);
-
-  const canceledSeries = useMemo(() => {
-    const buckets = bucketSeries(canceledDaily?.byDay, granularity, tz, {
-      valueKeys: ["rv1CanceledPostponed", "rv2CanceledPostponed"],
-    });
-    const trimmed = trimEmptyStart(buckets);
-    const capped = capPoints(
-      trimmed.buckets,
-      MAX_POINTS_BY_GRANULARITY[granularity]
-    );
-    return {
-      data: capped.map((bucket) => ({
-        label: bucket.label,
-        rv1CanceledPostponed:
-          bucket.values?.rv1CanceledPostponed ?? 0,
-        rv2CanceledPostponed:
-          bucket.values?.rv2CanceledPostponed ?? 0,
-        total:
-          (bucket.values?.rv1CanceledPostponed ?? 0) +
-          (bucket.values?.rv2CanceledPostponed ?? 0),
-      })),
-      trimmedFrom: trimmed.firstNonEmpty,
-      trimmedCount: trimmed.trimmedCount,
-    };
-  }, [canceledDaily, granularity, tz]);
-
-  const leadsBarPreset = useMemo(
-    () => getBarChartPreset(granularity, leadsSeries.data.length),
-    [granularity, leadsSeries.data.length]
-  );
-  const salesWeeklyBarPreset = useMemo(
-    () => getBarChartPreset(granularity, salesWeekly.length),
-    [granularity, salesWeekly.length]
-  );
-  const callReqBarPreset = useMemo(
-    () => getBarChartPreset(granularity, callReqSeries.data.length),
-    [granularity, callReqSeries.data.length]
-  );
-  const rv0BarPreset = useMemo(
-    () => getBarChartPreset(granularity, rv0Series.data.length),
-    [granularity, rv0Series.data.length]
-  );
-  const canceledBarPreset = useMemo(
-    () => getBarChartPreset(granularity, canceledSeries.data.length),
-    [granularity, canceledSeries.data.length]
-  );
-  const chartMargin =
-    granularity === "day"
-      ? { left: 8, right: 8, top: 10, bottom: 0 }
-      : { left: 0, right: 0, top: 0, bottom: 0 };
-
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center text-[--muted]">
@@ -3912,7 +3860,7 @@ function KpiBox({
 
       <div className="mt-4 flex gap-4">
         <Sidebar />
-        <div className="flex-1 space-y-3">
+        <div className="flex-1 space-y-6">
           {err && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               {err}
@@ -4591,35 +4539,37 @@ function KpiBox({
 
           {/* ===== Charts Deck ===== */}
           
-          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
+          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
             {/* Leads reçus */}
             {!isPersonFiltered && (
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
                 <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
-                    Leads reçus par jour{focusScopeSuffix}
+                    Leads reçus par {seriesGranularityLabel}
+                    {focusScopeSuffix}
                   </div>
                   <div className="text-xs text-[--muted]">
-                    {(leadsRcv?.total ?? 0).toLocaleString(
+                    {(leadsSeries.total ?? 0).toLocaleString(
                       "fr-FR"
                     )}{" "}
                     au total
                   </div>
                 </div>
-                <div className="h-48 mt-2">
-                  {leadsSeries.data.length ? (
+                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                  {leadsSeries.points.length ? (
                     <ResponsiveContainer
                       width="100%"
                       height="100%"
                     >
                       <BarChart
-                        data={leadsSeries.data}
-                        margin={chartMargin}
-                        barCategoryGap={
-                          leadsBarPreset.barCategoryGap
-                        }
-                        barGap={leadsBarPreset.barGap}
+                        data={leadsSeries.points}
+                        margin={{
+                          left: 8,
+                          right: 8,
+                          top: 10,
+                          bottom: 0,
+                        }}
                       >
                         <defs>
                           <linearGradient
@@ -4647,20 +4597,11 @@ function KpiBox({
                         />
                         <XAxis
                           dataKey="label"
-                          interval={
-                            granularity === "day"
-                              ? getDayInterval(
-                                  leadsSeries.data.length
-                                )
-                              : "preserveStartEnd"
-                              }
+                          interval={leadsTickInterval}
                           tick={{
                             fill: COLORS.axis,
                             fontSize: 12,
                           }}
-                          padding={
-                            leadsBarPreset.xAxisPadding
-                          }
                         />
                         <YAxis
                           allowDecimals={false}
@@ -4691,10 +4632,7 @@ function KpiBox({
                           dataKey="count"
                           fill="url(#gradLeads)"
                           radius={[8, 8, 0, 0]}
-                          barSize={leadsBarPreset.barSize}
-                          maxBarSize={
-                            leadsBarPreset.maxBarSize
-                          }
+                          maxBarSize={38}
                         />
                       </BarChart>
                     </ResponsiveContainer>
@@ -4704,20 +4642,6 @@ function KpiBox({
                     </div>
                   )}
                 </div>
-                {leadsSeries.trimmedCount > 0 &&
-                  leadsSeries.trimmedFrom && (
-                    <div className="text-[11px] text-[--muted] mt-1">
-                      Affichage depuis{" "}
-                      <b>
-                        {formatBucketNote(
-                          leadsSeries.trimmedFrom,
-                          granularity,
-                          tz
-                        )}
-                      </b>
-                      .
-                    </div>
-                  )}
                 <div className="text-[11px] text-[--muted] mt-2">
                   Basé sur la <b>date de création</b> du contact
                   {focusScopeSuffix || ""}.
@@ -4726,54 +4650,37 @@ function KpiBox({
             )}
 
             {/* CA hebdo (WON) */}
-            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
               <div className="absolute -left-16 -top-10 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
               <div className="flex items-center justify-between">
                 <div className="font-medium">
-                  Production hebdomadaire (ventes gagnées)
+                  Production{" "}
+                  {salesAggregated.granularity === "month"
+                    ? "mensuelle"
+                    : "hebdomadaire"}{" "}
+                  (ventes gagnées)
                 </div>
                 <div className="text-xs text-[--muted]">
-                  {(
-                    salesWeekly.reduce(
-                      (s, w) => s + (w.revenue || 0),
-                      0
-                    ) || 0
-                  ).toLocaleString("fr-FR")}{" "}
+                  {(salesAggregated.totalRevenue || 0).toLocaleString(
+                    "fr-FR"
+                  )}{" "}
                   €
                 </div>
               </div>
-              <div className="h-48 mt-2">
-                {salesWeekly.length ? (
+              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                {salesAggregated.points.length ? (
                   <ResponsiveContainer
                     width="100%"
                     height="100%"
                   >
                     <BarChart
-                      data={salesWeekly.map((w) => ({
-                        label:
-                          new Date(
-                            w.weekStart
-                          ).toLocaleDateString("fr-FR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                          }) +
-                          " → " +
-                          new Date(
-                            w.weekEnd
-                          ).toLocaleDateString("fr-FR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                          }),
-                        revenue: Math.round(
-                          w.revenue
-                        ),
-                        count: w.count,
-                      }))}
-                      margin={chartMargin}
-                      barCategoryGap={
-                        salesWeeklyBarPreset.barCategoryGap
-                      }
-                      barGap={salesWeeklyBarPreset.barGap}
+                      data={salesAggregated.points}
+                      margin={{
+                        left: 8,
+                        right: 8,
+                        top: 10,
+                        bottom: 0,
+                      }}
                     >
                       <defs>
                         <linearGradient
@@ -4819,13 +4726,11 @@ function KpiBox({
                       />
                       <XAxis
                         dataKey="label"
+                        interval={salesTickInterval}
                         tick={{
                           fill: COLORS.axis,
                           fontSize: 12,
                         }}
-                        padding={
-                          salesWeeklyBarPreset.xAxisPadding
-                        }
                       />
                       <YAxis
                         yAxisId="left"
@@ -4867,10 +4772,7 @@ function KpiBox({
                         dataKey="revenue"
                         fill="url(#gradRevenue)"
                         radius={[8, 8, 0, 0]}
-                        barSize={salesWeeklyBarPreset.barSize}
-                        maxBarSize={
-                          salesWeeklyBarPreset.maxBarSize
-                        }
+                        maxBarSize={44}
                       />
                       <Bar
                         yAxisId="right"
@@ -4878,10 +4780,7 @@ function KpiBox({
                         dataKey="count"
                         fill="url(#gradCount)"
                         radius={[8, 8, 0, 0]}
-                        barSize={salesWeeklyBarPreset.barSize}
-                        maxBarSize={
-                          salesWeeklyBarPreset.maxBarSize
-                        }
+                        maxBarSize={44}
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -4898,30 +4797,31 @@ function KpiBox({
             </div>
 
             {/* Call requests */}
-            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
               <div className="flex items-center justify-between">
                 <div className="font-medium">
-                  Demandes d’appel par jour
+                  Demandes d’appel par {seriesGranularityLabel}
                 </div>
                 <div className="text-xs text-[--muted]">
-                  {(mCallReq?.total ?? 0).toLocaleString(
+                  {(callReqSeries.total ?? 0).toLocaleString(
                     "fr-FR"
                   )}
                 </div>
               </div>
-              <div className="h-48 mt-2">
-                {callReqSeries.data.length ? (
+              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                {callReqSeries.points.length ? (
                   <ResponsiveContainer
                     width="100%"
                     height="100%"
                   >
                     <BarChart
-                      data={callReqSeries.data}
-                      margin={chartMargin}
-                      barCategoryGap={
-                        callReqBarPreset.barCategoryGap
-                      }
-                      barGap={callReqBarPreset.barGap}
+                      data={callReqSeries.points}
+                      margin={{
+                        left: 8,
+                        right: 8,
+                        top: 10,
+                        bottom: 0,
+                      }}
                     >
                       <defs>
                         <linearGradient
@@ -4949,20 +4849,11 @@ function KpiBox({
                       />
                       <XAxis
                         dataKey="label"
-                        interval={
-                          granularity === "day"
-                            ? getDayInterval(
-                                callReqSeries.data.length
-                              )
-                            : "preserveStartEnd"
-                        }
+                        interval={callReqTickInterval}
                         tick={{
                           fill: COLORS.axis,
                           fontSize: 12,
                         }}
-                        padding={
-                          callReqBarPreset.xAxisPadding
-                        }
                       />
                       <YAxis
                         allowDecimals={false}
@@ -4993,10 +4884,7 @@ function KpiBox({
                         dataKey="count"
                         fill="url(#gradCallReq)"
                         radius={[8, 8, 0, 0]}
-                        barSize={callReqBarPreset.barSize}
-                        maxBarSize={
-                          callReqBarPreset.maxBarSize
-                        }
+                        maxBarSize={38}
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -5006,20 +4894,6 @@ function KpiBox({
                   </div>
                 )}
               </div>
-              {callReqSeries.trimmedCount > 0 &&
-                callReqSeries.trimmedFrom && (
-                  <div className="text-[11px] text-[--muted] mt-1">
-                    Affichage depuis{" "}
-                    <b>
-                      {formatBucketNote(
-                        callReqSeries.trimmedFrom,
-                        granularity,
-                        tz
-                      )}
-                    </b>
-                    .
-                  </div>
-                )}
               <div className="text-[11px] text-[--muted] mt-2">
                 Basé sur{" "}
                 <b>CallRequest.requestedAt</b>.
@@ -5028,24 +4902,25 @@ function KpiBox({
 
             {/* RV0 faits par jour */}
             {!isCloserFiltered && (
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
                 <div className="flex items-center justify-between">
-                  <div className="font-medium">RV0 faits par jour</div>
+                  <div className="font-medium">
+                    RV0 faits par {seriesGranularityLabel}
+                  </div>
                   <div className="text-xs text-[--muted]">
-                    {(rv0Daily?.total ?? 0).toLocaleString("fr-FR")} au total
+                    {(rv0HonoredSeries.total ?? 0).toLocaleString(
+                      "fr-FR"
+                    )}{" "}
+                    au total
                   </div>
                 </div>
 
-                <div className="h-48 mt-2">
-                  {rv0Series.data.length ? (
+                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                  {rv0HonoredSeries.points.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={rv0Series.data}
-                        margin={chartMargin}
-                        barCategoryGap={
-                          rv0BarPreset.barCategoryGap
-                        }
-                        barGap={rv0BarPreset.barGap}
+                        data={rv0HonoredSeries.points}
+                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
                       >
                         <defs>
                           <linearGradient id="gradRv0Done" x1="0" y1="0" x2="0" y2="1">
@@ -5057,15 +4932,8 @@ function KpiBox({
                         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
                         <XAxis
                           dataKey="label"
-                          interval={
-                            granularity === "day"
-                              ? getDayInterval(
-                                  rv0Series.data.length
-                                )
-                              : "preserveStartEnd"
-                          }
+                          interval={rv0TickInterval}
                           tick={{ fill: COLORS.axis, fontSize: 12 }}
-                          padding={rv0BarPreset.xAxisPadding}
                         />
                         <YAxis
                           allowDecimals={false}
@@ -5087,10 +4955,7 @@ function KpiBox({
                           dataKey="count"
                           fill="url(#gradRv0Done)"
                           radius={[8, 8, 0, 0]}
-                          barSize={rv0BarPreset.barSize}
-                          maxBarSize={
-                            rv0BarPreset.maxBarSize
-                          }
+                          maxBarSize={40}
                         />
                       </BarChart>
                     </ResponsiveContainer>
@@ -5100,21 +4965,6 @@ function KpiBox({
                     </div>
                   )}
                 </div>
-                {rv0Series.trimmedCount > 0 &&
-                  rv0Series.trimmedFrom && (
-                    <div className="text-[11px] text-[--muted] mt-1">
-                      Affichage depuis{" "}
-                      <b>
-                        {formatBucketNote(
-                          rv0Series.trimmedFrom,
-                          granularity,
-                          tz
-                        )}
-                      </b>
-                      .
-                    </div>
-                  )}
-
 
                 <div className="text-[11px] text-[--muted] mt-2">
                   Basé sur les <b>StageEvents RV0_HONORED</b> (date de RDV).
@@ -5125,30 +4975,29 @@ function KpiBox({
 
             {/* RV0 no-show weekly */}
             {!isPersonFiltered && (
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
-                    RV0 no-show par semaine
+                    RV0 no-show par {seriesGranularityLabel}
                   </div>
                   <div className="text-xs text-[--muted]">
-                    {rv0NsWeekly
-                      .reduce(
-                        (s, x) => s + (x.count || 0),
-                        0
-                      )
-                      .toLocaleString("fr-FR")}
+                    {(rv0NoShowAggregated.total || 0).toLocaleString("fr-FR")}
                   </div>
                 </div>
-                <div className="h-48 mt-2">
-                  {canceledSeries.data.length ? (
-                    <ResponsiveContainer width="100%" height="100%">
+                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                  {rv0NoShowAggregated.points.length ? (
+                    <ResponsiveContainer
+                      width="100%"
+                      height="100%"
+                    >
                       <BarChart
-                        data={canceledDaily.byDay}
-                        margin={chartMargin}
-                        barCategoryGap={
-                          canceledBarPreset.barCategoryGap
-                        }
-                        barGap={canceledBarPreset.barGap}
+                        data={rv0NoShowAggregated.points}
+                        margin={{
+                          left: 8,
+                          right: 8,
+                          top: 10,
+                          bottom: 0,
+                        }}
                       >
                         <defs>
                           <linearGradient
@@ -5176,13 +5025,11 @@ function KpiBox({
                         />
                         <XAxis
                           dataKey="label"
+                          interval={rv0NoShowTickInterval}
                           tick={{
                             fill: COLORS.axis,
                             fontSize: 12,
                           }}
-                          padding={
-                            canceledBarPreset.xAxisPadding
-                          }
                         />
                         <YAxis
                           allowDecimals={false}
@@ -5213,31 +5060,20 @@ function KpiBox({
                           dataKey="count"
                           fill="url(#gradRv0Ns)"
                           radius={[8, 8, 0, 0]}
-                          barSize={canceledBarPreset.barSize}
-                          maxBarSize={
-                            canceledBarPreset.maxBarSize
-                          }
+                          maxBarSize={44}
                           onClick={(d: any) => {
-                            if (!d?.activeLabel) return;
+                            const payload =
+                              d?.payload ||
+                              d?.activePayload?.[0]?.payload;
                             const row =
-                              rv0NsWeekly.find(
-                                (x) =>
-                                  x.label ===
-                                  d.activeLabel
-                              );
+                              payload as AggregatedCountPoint | undefined;
                             if (!row) return;
                             openAppointmentsDrill({
-                              title: `RV0 no-show – semaine ${row.label}`,
+                              title: `RV0 no-show – ${row.label}`,
                               type: "RV0",
                               status: "NO_SHOW",
-                              from: row.weekStart.slice(
-                                0,
-                                10
-                              ),
-                              to: row.weekEnd.slice(
-                                0,
-                                10
-                              ),
+                              from: row.from,
+                              to: row.to,
                             });
                           }}
                         />
@@ -5251,127 +5087,108 @@ function KpiBox({
                 </div>
                 <div className="text-[11px] text-[--muted] mt-2">
                   Compté sur la{" "}
-                  <b>date/heure du RDV</b> : chaque barre = lundi → dimanche.
+                  <b>date/heure du RDV</b> : chaque barre ={" "}
+                  {seriesGranularity === "week"
+                    ? "lundi → dimanche"
+                    : seriesGranularityLabel}
+                  .
                 </div>
 
-                </div>
-            )}
-            {/* Annulés / reportés par jour — RV1 & RV2 */}
-            {!isPersonFiltered && (
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">Annulés / reportés par jour (RV1 & RV2)</div>
-                  <div className="text-xs text-[--muted]">
-                    {(canceledDaily?.total ?? 0).toLocaleString("fr-FR")} au total
+                {/* Annulés / reportés par jour — RV1 & RV2 */}
+                <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium">
+                      Annulés / reportés par {seriesGranularityLabel} (RV1 & RV2)
+                    </div>
+                    <div className="text-xs text-[--muted]">
+                      {(canceledAggregated.total ?? 0).toLocaleString(
+                        "fr-FR"
+                      )}{" "}
+                      au total
+                    </div>
+                  </div>
+
+                  <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                    {canceledAggregated.points.length ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={canceledAggregated.points}
+                          margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                        >
+                          <defs>
+                            {/* RV1 : annulé + reporté */}
+                            <linearGradient id="gradRv1Status" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.95} />
+                              <stop offset="100%" stopColor="#b45309" stopOpacity={0.75} />
+                            </linearGradient>
+                            {/* RV2 : annulé + reporté */}
+                            <linearGradient id="gradRv2Status" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
+                              <stop offset="100%" stopColor="#2563eb" stopOpacity={0.75} />
+                            </linearGradient>
+                          </defs>
+
+                          <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
+
+                          <XAxis
+                            dataKey="label"
+                            type="category"
+                            interval={canceledTickInterval}
+                            tick={{ fill: COLORS.axis, fontSize: 12 }}
+                          />
+
+                          <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
+
+                          <Tooltip
+                            content={
+                              <ProTooltip
+                                title="Annulés / reportés"
+                                valueFormatters={{
+                                  rv1CanceledPostponed: (v) => fmtInt(v),
+                                  rv2CanceledPostponed: (v) => fmtInt(v),
+                                  total: (v) => fmtInt(v),
+                                }}
+                              />
+                            }
+                          />
+                          <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
+
+                          {/* Deux barres côte à côte (pas de stackId) */}
+                          <Bar
+                            name="RV1 annulés + reportés"
+                            dataKey="rv1CanceledPostponed"
+                            fill="url(#gradRv1Status)"
+                            radius={[8, 8, 0, 0]}
+                            maxBarSize={40}
+                          />
+                          <Bar
+                            name="RV2 annulés + reportés"
+                            dataKey="rv2CanceledPostponed"
+                            fill="url(#gradRv2Status)"
+                            radius={[8, 8, 0, 0]}
+                            maxBarSize={40}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-[--muted] text-sm">
+                        Pas de données.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-[11px] text-[--muted] mt-2">
+                    Agrégation{" "}
+                    {seriesGranularity === "day"
+                      ? "quotidienne"
+                      : seriesGranularity === "week"
+                        ? "hebdomadaire"
+                        : "mensuelle"}{" "}
+                    dans le fuseau <b>{tz}</b> · chaque barre combine
+                    <b> annulés + reportés</b> pour RV1 et RV2.
                   </div>
                 </div>
 
-                <div className="h-48 mt-2">
-                  {canceledDaily?.byDay?.length ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={canceledDaily.byDay}
-                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
-                        barCategoryGap={
-                          canceledBarPreset.barCategoryGap
-                        }
-                        barGap={canceledBarPreset.barGap}
-                      >
-                        <defs>
-                          {/* RV1 : annulé + reporté */}
-                          <linearGradient id="gradRv1Status" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.95} />
-                            <stop offset="100%" stopColor="#b45309" stopOpacity={0.75} />
-                          </linearGradient>
-                          {/* RV2 : annulé + reporté */}
-                          <linearGradient id="gradRv2Status" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.95} />
-                            <stop offset="100%" stopColor="#2563eb" stopOpacity={0.75} />
-                          </linearGradient>
-                        </defs>
-
-                        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
-
-                        <XAxis
-                          dataKey="label"
-                          type="category"
-                          interval={
-                            granularity === "day"
-                              ? getDayInterval(
-                                  canceledSeries.data.length
-                                )
-                              : "preserveStartEnd"
-                          }
-                          tick={{ fill: COLORS.axis, fontSize: 12 }}
-                          padding={
-                            canceledBarPreset.xAxisPadding
-                          }
-                        />
-
-                        <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
-
-                        <Tooltip
-                          content={
-                            <ProTooltip
-                              title="Annulés / reportés"
-                              valueFormatters={{
-                                rv1CanceledPostponed: (v) => fmtInt(v),
-                                rv2CanceledPostponed: (v) => fmtInt(v),
-                                total: (v) => fmtInt(v),
-                              }}
-                            />
-                          }
-                        />
-                        <Legend wrapperStyle={{ color: "#fff", opacity: 0.8 }} />
-
-                        {/* Deux barres côte à côte (pas de stackId) */}
-                        <Bar
-                          name="RV1 annulés + reportés"
-                          dataKey="rv1CanceledPostponed"
-                          fill="url(#gradRv1Status)"
-                          radius={[8, 8, 0, 0]}
-                          barSize={canceledBarPreset.barSize}
-                          maxBarSize={
-                            canceledBarPreset.maxBarSize
-                          }
-                        />
-                        <Bar
-                          name="RV2 annulés + reportés"
-                          dataKey="rv2CanceledPostponed"
-                          fill="url(#gradRv2Status)"
-                          radius={[8, 8, 0, 0]}
-                          barSize={canceledBarPreset.barSize}
-                          maxBarSize={
-                            canceledBarPreset.maxBarSize
-                          }
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-[--muted] text-sm">
-                      Pas de données.
-                    </div>
-                  )}
-                </div>
-                {canceledSeries.trimmedCount > 0 &&
-                  canceledSeries.trimmedFrom && (
-                    <div className="text-[11px] text-[--muted] mt-1">
-                      Affichage depuis{" "}
-                      <b>
-                        {formatBucketNote(
-                          canceledSeries.trimmedFrom,
-                          granularity,
-                          tz
-                        )}
-                      </b>
-                      .
-                    </div>
-                  )}
-
-                <div className="text-[11px] text-[--muted] mt-2">
-                  Agrégation quotidienne dans le fuseau <b>{tz}</b> · chaque barre combine
-                  <b> annulés + reportés</b> pour RV1 et RV2.
-                </div>
               </div>
             )}
           </div>
