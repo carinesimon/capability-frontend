@@ -453,6 +453,41 @@ function formatBucketNote(bucket: Bucket, granularity: Granularity, tz?: string)
   return String(bucket.meta?.year ?? bucket.startISO.slice(0, 4));
 }
 
+type BarChartPreset = {
+  barCategoryGap: number | string;
+  barGap: number;
+  barSize: number;
+  maxBarSize: number;
+  xAxisPadding: { left: number; right: number };
+};
+
+function getBarChartPreset(
+  granularity: Granularity,
+  pointsCount: number
+): BarChartPreset {
+  if (granularity !== "day") {
+    return {
+      barCategoryGap: "5%",
+      barGap: 0,
+      barSize: 4,
+      maxBarSize: 10,
+      xAxisPadding: { left: 0, right: 0 },
+    };
+  }
+
+  const isDense = pointsCount > 45;
+  const isModerate = pointsCount > 31;
+  const barSize = isDense ? 6 : isModerate ? 8 : 10;
+
+  return {
+    barCategoryGap: "20%",
+    barGap: 2,
+    barSize,
+    maxBarSize: isDense ? 16 : 28,
+    xAxisPadding: { left: 8, right: 8 },
+  };
+}
+
 function getNumericValue(value: unknown) {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -3711,6 +3746,27 @@ function KpiBox({
     };
   }, [canceledDaily, granularity, tz]);
 
+  const leadsBarPreset = useMemo(
+    () => getBarChartPreset(granularity, leadsSeries.data.length),
+    [granularity, leadsSeries.data.length]
+  );
+  const salesWeeklyBarPreset = useMemo(
+    () => getBarChartPreset(granularity, salesWeekly.length),
+    [granularity, salesWeekly.length]
+  );
+  const callReqBarPreset = useMemo(
+    () => getBarChartPreset(granularity, callReqSeries.data.length),
+    [granularity, callReqSeries.data.length]
+  );
+  const rv0BarPreset = useMemo(
+    () => getBarChartPreset(granularity, rv0Series.data.length),
+    [granularity, rv0Series.data.length]
+  );
+  const canceledBarPreset = useMemo(
+    () => getBarChartPreset(granularity, canceledSeries.data.length),
+    [granularity, canceledSeries.data.length]
+  );
+
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center text-[--muted]">
@@ -4561,6 +4617,10 @@ function KpiBox({
                           top: 10,
                           bottom: 0,
                         }}
+                        barCategoryGap={
+                          leadsBarPreset.barCategoryGap
+                        }
+                        barGap={leadsBarPreset.barGap}
                       >
                         <defs>
                           <linearGradient
@@ -4594,11 +4654,13 @@ function KpiBox({
                                   leadsSeries.data.length
                                 )
                               : "preserveStartEnd"
-                          }
                           tick={{
                             fill: COLORS.axis,
                             fontSize: 12,
                           }}
+                          padding={
+                            leadsBarPreset.xAxisPadding
+                          }
                         />
                         <YAxis
                           allowDecimals={false}
@@ -4629,7 +4691,10 @@ function KpiBox({
                           dataKey="count"
                           fill="url(#gradLeads)"
                           radius={[8, 8, 0, 0]}
-                          maxBarSize={38}
+                          barSize={leadsBarPreset.barSize}
+                          maxBarSize={
+                            leadsBarPreset.maxBarSize
+                          }
                         />
                       </BarChart>
                     </ResponsiveContainer>
@@ -4710,6 +4775,10 @@ function KpiBox({
                         top: 10,
                         bottom: 0,
                       }}
+                      barCategoryGap={
+                        salesWeeklyBarPreset.barCategoryGap
+                      }
+                      barGap={salesWeeklyBarPreset.barGap}
                     >
                       <defs>
                         <linearGradient
@@ -4759,6 +4828,9 @@ function KpiBox({
                           fill: COLORS.axis,
                           fontSize: 12,
                         }}
+                        padding={
+                          salesWeeklyBarPreset.xAxisPadding
+                        }
                       />
                       <YAxis
                         yAxisId="left"
@@ -4800,7 +4872,10 @@ function KpiBox({
                         dataKey="revenue"
                         fill="url(#gradRevenue)"
                         radius={[8, 8, 0, 0]}
-                        maxBarSize={44}
+                        barSize={salesWeeklyBarPreset.barSize}
+                        maxBarSize={
+                          salesWeeklyBarPreset.maxBarSize
+                        }
                       />
                       <Bar
                         yAxisId="right"
@@ -4808,7 +4883,10 @@ function KpiBox({
                         dataKey="count"
                         fill="url(#gradCount)"
                         radius={[8, 8, 0, 0]}
-                        maxBarSize={44}
+                        barSize={salesWeeklyBarPreset.barSize}
+                        maxBarSize={
+                          salesWeeklyBarPreset.maxBarSize
+                        }
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -4850,6 +4928,10 @@ function KpiBox({
                         top: 10,
                         bottom: 0,
                       }}
+                      barCategoryGap={
+                        callReqBarPreset.barCategoryGap
+                      }
+                      barGap={callReqBarPreset.barGap}
                     >
                       <defs>
                         <linearGradient
@@ -4888,6 +4970,9 @@ function KpiBox({
                           fill: COLORS.axis,
                           fontSize: 12,
                         }}
+                        padding={
+                          callReqBarPreset.xAxisPadding
+                        }
                       />
                       <YAxis
                         allowDecimals={false}
@@ -4918,7 +5003,10 @@ function KpiBox({
                         dataKey="count"
                         fill="url(#gradCallReq)"
                         radius={[8, 8, 0, 0]}
-                        maxBarSize={38}
+                        barSize={callReqBarPreset.barSize}
+                        maxBarSize={
+                          callReqBarPreset.maxBarSize
+                        }
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -4964,6 +5052,10 @@ function KpiBox({
                       <BarChart
                         data={rv0Series.data}
                         margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                        barCategoryGap={
+                          rv0BarPreset.barCategoryGap
+                        }
+                        barGap={rv0BarPreset.barGap}
                       >
                         <defs>
                           <linearGradient id="gradRv0Done" x1="0" y1="0" x2="0" y2="1">
@@ -4983,6 +5075,7 @@ function KpiBox({
                               : "preserveStartEnd"
                           }
                           tick={{ fill: COLORS.axis, fontSize: 12 }}
+                          padding={rv0BarPreset.xAxisPadding}
                         />
                         <YAxis
                           allowDecimals={false}
@@ -5004,7 +5097,10 @@ function KpiBox({
                           dataKey="count"
                           fill="url(#gradRv0Done)"
                           radius={[8, 8, 0, 0]}
-                          maxBarSize={40}
+                          barSize={rv0BarPreset.barSize}
+                          maxBarSize={
+                            rv0BarPreset.maxBarSize
+                          }
                         />
                       </BarChart>
                     </ResponsiveContainer>
@@ -5059,6 +5155,10 @@ function KpiBox({
                       <BarChart
                         data={canceledSeries.data}
                         margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                        barCategoryGap={
+                          canceledBarPreset.barCategoryGap
+                        }
+                        barGap={canceledBarPreset.barGap}
                       >
                         <defs>
                           <linearGradient
@@ -5090,6 +5190,9 @@ function KpiBox({
                             fill: COLORS.axis,
                             fontSize: 12,
                           }}
+                          padding={
+                            canceledBarPreset.xAxisPadding
+                          }
                         />
                         <YAxis
                           allowDecimals={false}
@@ -5120,7 +5223,10 @@ function KpiBox({
                           dataKey="count"
                           fill="url(#gradRv0Ns)"
                           radius={[8, 8, 0, 0]}
-                          maxBarSize={44}
+                          barSize={canceledBarPreset.barSize}
+                          maxBarSize={
+                            canceledBarPreset.maxBarSize
+                          }
                           onClick={(d: any) => {
                             if (!d?.activeLabel) return;
                             const row =
@@ -5176,6 +5282,10 @@ function KpiBox({
                       <BarChart
                         data={canceledDaily.byDay}
                         margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                        barCategoryGap={
+                          canceledBarPreset.barCategoryGap
+                        }
+                        barGap={canceledBarPreset.barGap}
                       >
                         <defs>
                           {/* RV1 : annulé + reporté */}
@@ -5203,6 +5313,9 @@ function KpiBox({
                               : "preserveStartEnd"
                           }
                           tick={{ fill: COLORS.axis, fontSize: 12 }}
+                          padding={
+                            canceledBarPreset.xAxisPadding
+                          }
                         />
 
                         <YAxis allowDecimals={false} tick={{ fill: COLORS.axis, fontSize: 12 }} />
@@ -5227,14 +5340,20 @@ function KpiBox({
                           dataKey="rv1CanceledPostponed"
                           fill="url(#gradRv1Status)"
                           radius={[8, 8, 0, 0]}
-                          maxBarSize={40}
+                          barSize={canceledBarPreset.barSize}
+                          maxBarSize={
+                            canceledBarPreset.maxBarSize
+                          }
                         />
                         <Bar
                           name="RV2 annulés + reportés"
                           dataKey="rv2CanceledPostponed"
                           fill="url(#gradRv2Status)"
                           radius={[8, 8, 0, 0]}
-                          maxBarSize={40}
+                          barSize={canceledBarPreset.barSize}
+                          maxBarSize={
+                            canceledBarPreset.maxBarSize
+                          }
                         />
                       </BarChart>
                     </ResponsiveContainer>
