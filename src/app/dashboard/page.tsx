@@ -3766,6 +3766,10 @@ function KpiBox({
     () => getBarChartPreset(granularity, canceledSeries.data.length),
     [granularity, canceledSeries.data.length]
   );
+  const chartMargin =
+    granularity === "day"
+      ? { left: 8, right: 8, top: 10, bottom: 0 }
+      : { left: 0, right: 0, top: 0, bottom: 0 };
 
   if (!authChecked) {
     return (
@@ -4611,12 +4615,7 @@ function KpiBox({
                     >
                       <BarChart
                         data={leadsSeries.data}
-                        margin={{
-                          left: 8,
-                          right: 8,
-                          top: 10,
-                          bottom: 0,
-                        }}
+                        margin={chartMargin}
                         barCategoryGap={
                           leadsBarPreset.barCategoryGap
                         }
@@ -4770,12 +4769,7 @@ function KpiBox({
                         ),
                         count: w.count,
                       }))}
-                      margin={{
-                        left: 8,
-                        right: 8,
-                        top: 10,
-                        bottom: 0,
-                      }}
+                      margin={chartMargin}
                       barCategoryGap={
                         salesWeeklyBarPreset.barCategoryGap
                       }
@@ -4923,12 +4917,7 @@ function KpiBox({
                   >
                     <BarChart
                       data={callReqSeries.data}
-                      margin={{
-                        left: 8,
-                        right: 8,
-                        top: 10,
-                        bottom: 0,
-                      }}
+                      margin={chartMargin}
                       barCategoryGap={
                         callReqBarPreset.barCategoryGap
                       }
@@ -5052,7 +5041,7 @@ function KpiBox({
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={rv0Series.data}
-                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                        margin={chartMargin}
                         barCategoryGap={
                           rv0BarPreset.barCategoryGap
                         }
@@ -5154,8 +5143,8 @@ function KpiBox({
                   {canceledSeries.data.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={canceledSeries.data}
-                        margin={{ left: 8, right: 8, top: 10, bottom: 0 }}
+                        data={canceledDaily.byDay}
+                        margin={chartMargin}
                         barCategoryGap={
                           canceledBarPreset.barCategoryGap
                         }
