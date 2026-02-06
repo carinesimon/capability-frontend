@@ -2254,6 +2254,14 @@ const neutralKpiCell =
 
   const stageSeriesWarningSent = useRef(false);
   const tagsUnsupportedEndpointsRef = useRef<Set<string>>(new Set());
+  const pagerRefs = useRef<Array<HTMLElement | null>>([]);
+  const scrollToPager = useCallback((index: number) => {
+    pagerRefs.current[index]?.scrollIntoView({
+      behavior: "smooth",
+      inline: "start",
+      block: "nearest",
+    });
+  }, []);
   const clearFilters = useCallback(() => {
     setSetterIds([]);
     setCloserIds([]);
@@ -3740,7 +3748,7 @@ function KpiBox({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6">
+    <div className="h-[100dvh] overflow-hidden max-w-7xl mx-auto px-4 py-3">
       {/* ===== EN-TÊTE ===== */}
       <div className="rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(29,38,58,.9),rgba(13,18,29,.9))] px-5 py-5 relative overflow-hidden">
         <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-white/[0.04] blur-3xl pointer-events-none" />
@@ -3858,9 +3866,28 @@ function KpiBox({
         </div>
       </div>
 
-      <div className="mt-4 flex gap-4">
-        <Sidebar />
-        <div className="flex-1 space-y-6">
+      <div className="mt-3 h-[calc(100dvh-10.5rem)] min-h-0">
+        <div className="mb-2 flex items-center gap-2 overflow-x-auto">
+          {[["Aperçu", 0], ["Graphiques", 1], ["Classements", 2], ["Tables", 3]].map(([label, idx]) => (
+            <button
+              key={String(label)}
+              type="button"
+              className="tab whitespace-nowrap"
+              onClick={() => scrollToPager(Number(idx))}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="h-full min-h-0 overflow-x-auto overflow-y-hidden">
+          <div className="h-full min-h-0 flex snap-x snap-mandatory scroll-smooth">
+            <section
+              ref={(el) => {
+                pagerRefs.current[0] = el;
+              }}
+              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+            >
+              <div className="flex-1 min-h-0 space-y-3 overflow-hidden">
           {err && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               {err}
@@ -3873,7 +3900,7 @@ function KpiBox({
           )}
 
           {/* KPI principaux */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
            <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
@@ -4536,13 +4563,23 @@ function KpiBox({
               </div>
             </div>
           )}
+        </div>
+            </section>
+
+            <section
+              ref={(el) => {
+                pagerRefs.current[1] = el;
+              }}
+              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+            >
+              <div className="flex-1 min-h-0 overflow-hidden">
 
           {/* ===== Charts Deck ===== */}
           
-          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="mt-2 grid grid-cols-1 xl:grid-cols-2 gap-3">
             {/* Leads reçus */}
             {!isPersonFiltered && (
-              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-3">
                 <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
@@ -4556,7 +4593,7 @@ function KpiBox({
                     au total
                   </div>
                 </div>
-                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                <div className="h-44 mt-2 w-full min-w-0 overflow-hidden">
                   {leadsSeries.points.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -4650,7 +4687,7 @@ function KpiBox({
             )}
 
             {/* CA hebdo (WON) */}
-            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-3">
               <div className="absolute -left-16 -top-10 w-56 h-56 rounded-full bg-white/[0.04] blur-3xl" />
               <div className="flex items-center justify-between">
                 <div className="font-medium">
@@ -4667,7 +4704,7 @@ function KpiBox({
                   €
                 </div>
               </div>
-              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+              <div className="h-44 mt-2 w-full min-w-0 overflow-hidden">
                 {salesAggregated.points.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4797,7 +4834,7 @@ function KpiBox({
             </div>
 
             {/* Call requests */}
-            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+            <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-3">
               <div className="flex items-center justify-between">
                 <div className="font-medium">
                   Demandes d’appel par {seriesGranularityLabel}
@@ -4808,7 +4845,7 @@ function KpiBox({
                   )}
                 </div>
               </div>
-              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+              <div className="h-44 mt-2 w-full min-w-0 overflow-hidden">
                 {callReqSeries.points.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4902,7 +4939,7 @@ function KpiBox({
 
             {/* RV0 faits par jour */}
             {!isCloserFiltered && (
-              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4">
+              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-3">
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
                     RV0 faits par {seriesGranularityLabel}
@@ -4914,8 +4951,7 @@ function KpiBox({
                     au total
                   </div>
                 </div>
-
-                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+<div className="h-44 mt-2 w-full min-w-0 overflow-hidden">
                   {rv0HonoredSeries.points.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
@@ -4975,7 +5011,7 @@ function KpiBox({
 
             {/* RV0 no-show weekly */}
             {!isPersonFiltered && (
-              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+              <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-3 xl:col-span-2">
                 <div className="flex items-center justify-between">
                   <div className="font-medium">
                     RV0 no-show par {seriesGranularityLabel}
@@ -4984,7 +5020,7 @@ function KpiBox({
                     {(rv0NoShowAggregated.total || 0).toLocaleString("fr-FR")}
                   </div>
                 </div>
-                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                <div className="h-44 mt-2 w-full min-w-0 overflow-hidden">
                   {rv0NoShowAggregated.points.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -5095,7 +5131,7 @@ function KpiBox({
                 </div>
 
                 {/* Annulés / reportés par jour — RV1 & RV2 */}
-                <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-4 xl:col-span-2">
+                <div className="relative w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-[rgba(16,21,32,.55)] backdrop-blur-xl p-3 xl:col-span-2">
                   <div className="flex items-center justify-between">
                     <div className="font-medium">
                       Annulés / reportés par {seriesGranularityLabel} (RV1 & RV2)
@@ -5108,7 +5144,7 @@ function KpiBox({
                     </div>
                   </div>
 
-                  <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
+                  <div className="h-44 mt-2 w-full min-w-0 overflow-hidden">
                     {canceledAggregated.points.length ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
@@ -5193,8 +5229,18 @@ function KpiBox({
             )}
           </div>
 
+          </div>
+            </section>
+
+            <section
+              ref={(el) => {
+                pagerRefs.current[2] = el;
+              }}
+              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+            >
+
           {/* ===== Classements & Hall of Fame ===== */}
-          <div className="relative mt-6">
+          <div className="relative mt-2">
             <div className="absolute inset-0 -z-10">
               <div
                 className="pointer-events-none absolute -top-24 left-1/3 h-72 w-[60vw] rounded-full blur-3xl opacity-25"
@@ -5212,9 +5258,9 @@ function KpiBox({
               />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
               {/* Top Closer */}
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-3">
                 <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/[0.04] blur-2xl" />
                 <div className="flex items-center gap-3">
                   <div className="h-11 w-11 rounded-2xl bg-emerald-400/10 border border-emerald-400/25 flex items-center justify-center">
@@ -5280,7 +5326,7 @@ function KpiBox({
               </div>
 
               {/* Top Setter */}
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-3">
                 <div className="absolute -right-10 -top-8 w-40 h-40 rounded-full bg-indigo-400/10 blur-2xl" />
                 <div className="flex items-center gap-3">
                   <div className="h-11 w-11 rounded-2xl bg-indigo-400/10 border border-indigo-400/25 flex items-center justify-center">
@@ -5347,7 +5393,7 @@ function KpiBox({
               </div>
 
               {/* Top Duo */}
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
+              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-3">
                 <div className="absolute right-0 bottom-0 w-40 h-40 rounded-full bg-amber-400/10 blur-2xl" />
                 <div className="flex items-center gap-3">
                   <div className="h-11 w-11 rounded-2xl bg-amber-400/10 border border-amber-400/25 flex items-center justify-center">
@@ -5420,9 +5466,20 @@ function KpiBox({
                 </div>
               </div>
             </div>
+          </div>
+
+            </section>
+
+            <section
+              ref={(el) => {
+                pagerRefs.current[3] = el;
+              }}
+              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+            >
+              <div className="flex-1 min-h-0 space-y-3 overflow-hidden">
 
            {/* Spotlight tables */}
-        <div className="mt-6 grid grid-cols-1 gap-5">
+        <div className="mt-1 grid grid-cols-1 gap-3">
           {/* Team Closers */}
           {!isSetterFocus && (
             <div className="rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,.22),_transparent_55%),_rgba(18,24,38,.9)] backdrop-blur-xl overflow-hidden shadow-[0_18px_45px_rgba(0,0,0,.55)]">
@@ -5444,7 +5501,7 @@ function KpiBox({
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="max-h-[42dvh] overflow-auto">
                 <table className="w-full text-sm min-w-[1500px]">
                   <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
                     <tr>
@@ -5654,7 +5711,7 @@ function KpiBox({
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="max-h-[42dvh] overflow-auto">
                 <table className="w-full text-sm min-w-[1280px]">
                   <thead className="text-left text-[--muted] text-[11px] uppercase sticky top-0 bg-[rgba(10,16,28,.96)] backdrop-blur-md border-b border-white/10">
                     <tr>
@@ -6011,6 +6068,8 @@ function KpiBox({
                 <PdfExports filters={filterOptionsParams} />
               </div>
             )}
+            </div>
+            </section>
           </div>
         </div>
       </div>
