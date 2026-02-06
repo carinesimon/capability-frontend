@@ -3885,9 +3885,9 @@ function KpiBox({
               ref={(el) => {
                 pagerRefs.current[0] = el;
               }}
-              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+              className="h-full min-h-0 snap-start w-full shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain flex flex-col"
             >
-              <div className="flex-1 min-h-0 space-y-3 overflow-hidden">
+              <div className="flex-1 min-h-0 pb-6">
           {err && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               {err}
@@ -4570,9 +4570,9 @@ function KpiBox({
               ref={(el) => {
                 pagerRefs.current[1] = el;
               }}
-              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+              className="h-full min-h-0 snap-start w-full shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain flex flex-col"
             >
-              <div className="flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 min-h-0 pb-6">
 
           {/* ===== Charts Deck ===== */}
           
@@ -5236,7 +5236,7 @@ function KpiBox({
               ref={(el) => {
                 pagerRefs.current[2] = el;
               }}
-              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+              className="h-full min-h-0 snap-start w-full shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-6 flex flex-col"
             >
 
           {/* ===== Classements & Hall of Fame ===== */}
@@ -5474,9 +5474,9 @@ function KpiBox({
               ref={(el) => {
                 pagerRefs.current[3] = el;
               }}
-              className="h-full min-h-0 w-full shrink-0 snap-start overflow-hidden flex flex-col"
+              className="h-full min-h-0 snap-start w-full shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain flex flex-col"
             >
-              <div className="flex-1 min-h-0 space-y-3 overflow-hidden">
+              <div className="flex-1 min-h-0 space-y-3 pb-6">
 
            {/* Spotlight tables */}
         <div className="mt-1 grid grid-cols-1 gap-3">
