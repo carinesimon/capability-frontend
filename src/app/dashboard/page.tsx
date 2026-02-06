@@ -3740,12 +3740,9 @@ function KpiBox({
   }
 
   return (
-    <div className="h-[100dvh] overflow-hidden">
-      <div className="h-full max-w-7xl mx-auto px-4">
-      <div className="h-full flex flex-col min-h-0 py-3">
-      <header className="shrink-0">
+    <div className="max-w-7xl mx-auto px-4 py-6">
       {/* ===== EN-TÊTE ===== */}
-      <div className="rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(29,38,58,.9),rgba(13,18,29,.9))] px-5 py-3 relative overflow-hidden">
+      <div className="rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(29,38,58,.9),rgba(13,18,29,.9))] px-5 py-5 relative overflow-hidden">
         <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-white/[0.04] blur-3xl pointer-events-none" />
         <div className="flex flex-col lg:flex-row gap-5">
           <div className="flex items-center gap-3">
@@ -3860,13 +3857,10 @@ function KpiBox({
 
         </div>
       </div>
-      </header>
 
-      <main className="mt-3 flex-1 min-h-0 overflow-hidden">
-      <div className="h-full min-h-0 flex gap-3">
+      <div className="mt-4 flex gap-4">
         <Sidebar />
-        <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-3">
-          <div className="min-h-0 overflow-hidden space-y-4">
+        <div className="flex-1 space-y-6">
           {err && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               {err}
@@ -3973,7 +3967,7 @@ function KpiBox({
           
           {/* ===== Pipeline insights ===== */}
           {!isPersonFiltered && (
-            <div className="relative max-h-[42dvh] overflow-auto pr-1">
+            <div className="relative">
               <div className="pointer-events-none absolute inset-0 -z-10">
                 <div
                   className="absolute left-1/2 -translate-x-1/2 -top-24 h-64 w-[70vw] rounded-full blur-3xl opacity-25"
@@ -4562,7 +4556,7 @@ function KpiBox({
                     au total
                   </div>
                 </div>
-                <div className="h-40 mt-1 w-full min-w-0 overflow-hidden">
+                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
                   {leadsSeries.points.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -4673,7 +4667,7 @@ function KpiBox({
                   €
                 </div>
               </div>
-              <div className="h-40 mt-1 w-full min-w-0 overflow-hidden">
+              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
                 {salesAggregated.points.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4814,7 +4808,7 @@ function KpiBox({
                   )}
                 </div>
               </div>
-              <div className="h-40 mt-1 w-full min-w-0 overflow-hidden">
+              <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
                 {callReqSeries.points.length ? (
                   <ResponsiveContainer
                     width="100%"
@@ -4921,7 +4915,7 @@ function KpiBox({
                   </div>
                 </div>
 
-                <div className="h-40 mt-1 w-full min-w-0 overflow-hidden">
+                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
                   {rv0HonoredSeries.points.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
@@ -4990,7 +4984,7 @@ function KpiBox({
                     {(rv0NoShowAggregated.total || 0).toLocaleString("fr-FR")}
                   </div>
                 </div>
-                <div className="h-40 mt-1 w-full min-w-0 overflow-hidden">
+                <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
                   {rv0NoShowAggregated.points.length ? (
                     <ResponsiveContainer
                       width="100%"
@@ -5114,7 +5108,7 @@ function KpiBox({
                     </div>
                   </div>
 
-                  <div className="h-40 mt-1 w-full min-w-0 overflow-hidden">
+                  <div className="h-64 mt-2 w-full min-w-0 overflow-hidden">
                     {canceledAggregated.points.length ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
@@ -5199,11 +5193,8 @@ function KpiBox({
             )}
           </div>
 
-          </div>
-
-          <div className="min-h-0 overflow-auto space-y-4 pr-1">
           {/* ===== Classements & Hall of Fame ===== */}
-          <div className="relative">
+          <div className="relative mt-6">
             <div className="absolute inset-0 -z-10">
               <div
                 className="pointer-events-none absolute -top-24 left-1/3 h-72 w-[60vw] rounded-full blur-3xl opacity-25"
@@ -5221,7 +5212,7 @@ function KpiBox({
               />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {/* Top Closer */}
               <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,24,38,.65)] backdrop-blur-xl p-4">
                 <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/[0.04] blur-2xl" />
@@ -6022,10 +6013,6 @@ function KpiBox({
             )}
           </div>
         </div>
-      </div>
-      </div>
-      </main>
-      </div>
       </div>
 
       {/* ===== PANNEAU FILTRES ===== */}
